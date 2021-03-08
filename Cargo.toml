@@ -1,0 +1,9 @@
+[package]
+name = "planet-sim"
+version = "0.1.0"
+description = "Planetary simulator of intermediate complexity."
+authors = ["adamsky <adamsky@enum.space>"]
+edition = "2018"
+
+[dependencies]
+serde = { version = "1.0.123", features = ["derive"] }
