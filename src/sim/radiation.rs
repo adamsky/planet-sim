@@ -1,7 +1,7 @@
 //! Radiation module, equivalent of radmod.
 
-use crate::constants::{NHOR, NLEP, NLEV, NTRU, NLON, NLPP};
-use crate::{Float, Int, Sim};
+use crate::constants::{NHOR, NLEP, NLEV, NLON, NLPP, NTRU};
+use crate::{Float, Int, Sim, Vec2d};
 
 /// Minimum value for eccen
 pub const ORB_ECCEN_MIN: Float = 0.0;
@@ -24,6 +24,7 @@ pub const ORB_UNDEF_INT: Int = 2000000000;
 /// flag to not use input year
 pub const ORB_NOT_YEAR_BASED: Int = ORB_UNDEF_INT;
 
+#[derive(Clone)]
 pub struct Radiation {
     // configurables
     /// Solar constant (set in planet module)
@@ -93,15 +94,15 @@ pub struct Radiation {
     /// Cosine of solar zenit angle
     pub gmu0: Vec<Float>, // NHOR
     /// Cosine of solar zenit angle
-    pub gmu1: [Float; NHOR],
+    pub gmu1: Vec<Float>, // NHOR
     /// Ozon concentration (kg/kg)
-    pub dqo3: [[Float; NHOR]; NLEV],
+    pub dqo3: Vec2d<Float>, // (NHOR, NLEV)
     /// co2 concentration (ppmv)
-    pub dqco2: [[Float; NHOR]; NLEV],
+    pub dqco2: Vec2d<Float>, // (NHOR, NLEV)
     /// lwr temperature tendencies
-    pub dtdtlwr: [[Float; NHOR]; NLEV],
+    pub dtdtlwr: Vec2d<Float>, // (NHOR, NLEV)
     /// swr temperature tendencies
-    pub dtdtswr: [[Float; NHOR]; NLEV],
+    pub dtdtswr: Vec2d<Float>, // (NHOR, NLEV)
     /// Climatological O3 (used if NO3=2)
     pub dqo3cl: Vec<Vec<Vec<Float>>>,
 
@@ -132,12 +133,12 @@ pub struct Radiation {
     pub log_print: bool,
 
     // extended entropy/energy diagnostics
-    pub dftde1: [[Float; NHOR]; NLEP],
-    pub dftde2: [[Float; NHOR]; NLEP],
-    pub dftue1: [[Float; NHOR]; NLEP],
-    pub dftue2: [[Float; NHOR]; NLEP],
-    pub dftu0: [[Float; NHOR]; NLEP],
-    pub dft: [[Float; NHOR]; NLEP],
+    pub dftde1: Vec2d<Float>, // (NHOR, NLEP)
+    pub dftde2: Vec2d<Float>, // (NHOR, NLEP)
+    pub dftue1: Vec2d<Float>, // (NHOR, NLEP)
+    pub dftue2: Vec2d<Float>, // (NHOR, NLEP)
+    pub dftu0: Vec2d<Float>,  // (NHOR, NLEP)
+    pub dft: Vec2d<Float>,    // (NHOR, NLEP)
 
     // auxiliary variables for solar zenit angle calculations
     /// cos(lat)*cos(decl)
@@ -186,26 +187,61 @@ impl Default for Radiation {
             rcl2: [0.15, 0.30, 0.60],
             acl2: [0.05, 0.10, 0.20],
 
+            gmu0: vec![],
+            gmu1: vec![],
+            dqo3: vec![],
+            dqco2: vec![],
+            dtdtlwr: vec![],
+            dtdtswr: vec![],
+            dqo3cl: vec![],
             gdist2: 1.0,
 
+            time4rad: 0.0,
+            time4swr: 0.0,
+            time4lwr: 0.0,
             ORB_UNDEF_INT: 2000000000,
+            obliqr: 0.0,
+            lambm0: 0.0,
+            mvelpp: 0.0,
+            eccf: 0.0,
+            iyrad: 0,
             log_print: true,
 
-            ..Default::default()
+            dftde1: vec![],
+            dftde2: vec![],
+            dftue1: vec![],
+            dftue2: vec![],
+            dftu0: vec![],
+            dft: vec![],
+            solclatcdec: 0.0,
+            solslat: 0.0,
+            solsdec: 0.0,
+            solslatsdec: 0.0,
+            zmuz: 0.0,
         }
     }
 }
 
 impl Radiation {
-    pub fn initialize(&mut self, sim: &mut Sim) {
+    pub fn initialize(
+        &mut self,
+        ndheat: Int,
+        neqsig: Int,
+        nfixorb: Int,
+        n_start_year: Int,
+        // planet vars
+        eccen: Float,
+        obliq: Float,
+        mvelp: Float,
+    ) {
         // select radiation setup based on resolution
         let mut jtune = 0;
-        if sim.int_scalars.ndheat > 0 {
+        if ndheat > 0 {
             if NTRU == 21 || NTRU == 1 {
                 if NLEV == 5 {
                     if self.ndcycle == 1 {
                         jtune = 0;
-                    } else if sim.int_scalars.neqsig == 1 {
+                    } else if neqsig == 1 {
                         jtune = 0;
                     } else {
                         self.tswr1 = 0.02;
@@ -219,7 +255,7 @@ impl Radiation {
                 else if NLEV == 10 {
                     if self.ndcycle == 1 {
                         jtune = 0;
-                    } else if sim.int_scalars.neqsig == 1 {
+                    } else if neqsig == 1 {
                         jtune = 0;
                     } else {
                         self.th2oc = 0.024;
@@ -235,7 +271,7 @@ impl Radiation {
                 if NLEV == 10 {
                     if self.ndcycle == 1 {
                         jtune = 0;
-                    } else if sim.int_scalars.neqsig == 1 {
+                    } else if neqsig == 1 {
                         jtune = 0;
                     } else {
                         self.tswr1 = 0.077;
@@ -250,7 +286,7 @@ impl Radiation {
             else if NTRU == 42 {
                 if NLEV == 1 {
                     jtune = 0;
-                } else if sim.int_scalars.neqsig == 1 {
+                } else if neqsig == 1 {
                     jtune = 0;
                 } else {
                     self.tswr1 = 0.089;
@@ -276,13 +312,24 @@ impl Radiation {
         // determine orbital parameters
         //
 
-        self.iyrbp = 1950 - sim.datetime.n_start_year;
+        self.iyrbp = 1950 - n_start_year;
         self.iyrad = 1950 - self.iyrbp;
 
-        if sim.planet_vars.nfixorb == 1 {
+        if nfixorb == 1 {
             // fixed orbital params (default AMIP II)
             self.iyrad = self.ORB_UNDEF_INT;
         }
+
+        orb_params(
+            self.iyrad,
+            eccen,
+            obliq,
+            mvelp,
+            self.log_print,
+            &mut self.obliqr,
+            &mut self.lambm0,
+            &mut self.mvelpp,
+        )
 
         // if (nfixorb == 1) then ! fixed orbital params (default AMIP II)
         // iyrad = ORB_UNDEF_INT
@@ -319,141 +366,139 @@ impl Radiation {
 /// dswfl(NHOR,NLEP) : short wave radiation (W/m2)  (modified)
 /// dfu(NHOR,NLEP)   : short wave radiation upward (W/m2) (modified)
 /// dfd(NHOR,NLEP)   : short wave radiation downward (W/m2) (modified)
-fn swr(sim: &mut Sim) {
-
+fn swr(mut sim: &mut Sim) {
     // 0) define local parameters and arrays
 
-    const zero: Float =1.E-6; // if insolation < zero : fluxes=0.
+    const zero: Float = 0.000001; // if insolation < zero : fluxes=0.
     const zsolar1: Float = 0.517; // spectral partitioning 1 (wl < 0.75mue)
-    const zsolar2=0.483; // spectral partitioning 2 (wl > 0.75mue)
-    const zbetta=1.66; // magnification factor water vapour
-    const zmbar=1.9; // magnification factor ozon
-    const zro3: Float =2.14; // ozon density (kg/m**3 STP)
-    const zfo3: Float = 100./zro3; // transfere o3 to cm STP
+    const zsolar2: Float = 0.483; // spectral partitioning 2 (wl > 0.75mue)
+    const zbetta: Float = 1.66; // magnification factor water vapour
+    const zmbar: Float = 1.9; // magnification factor ozon
+    const zro3: Float = 2.14; // ozon density (kg/m**3 STP)
+    const zfo3: Float = 100. / zro3; // transfere o3 to cm STP
 
     // transmissivities 1-l
-    let zt1: Vec<Vec<Float>>;// (NHOR,NLEP);
-    let zt2: Vec<Vec<Float>>;// (NHOR,NLEP);
-    // reflexivities l-1 (scattered)
-    let zr1s: Vec<Vec<Float>>;// (NHOR,NLEP);
-    let zr2s: Vec<Vec<Float>>;// (NHOR,NLEP);
-    // reflexivities l-NL (direct)
-    let zrl1: Vec<Vec<Float>>;// (NHOR,NLEP);
-    let zrl2: Vec<Vec<Float>>;// (NHOR,NLEP);
-    // reflexivities l-NL (scattered)
-    let zrl1s: Vec<Vec<Float>>;// (NHOR,NLEP);
-    let zrl2s: Vec<Vec<Float>>;// (NHOR,NLEP);
+    let zt1: Vec<Vec<Float>>; // (NHOR,NLEP);
+    let zt2: Vec<Vec<Float>>; // (NHOR,NLEP);
+                              // reflexivities l-1 (scattered)
+    let zr1s: Vec<Vec<Float>>; // (NHOR,NLEP);
+    let zr2s: Vec<Vec<Float>>; // (NHOR,NLEP);
+                               // reflexivities l-NL (direct)
+    let zrl1: Vec<Vec<Float>>; // (NHOR,NLEP);
+    let zrl2: Vec<Vec<Float>>; // (NHOR,NLEP);
+                               // reflexivities l-NL (scattered)
+    let zrl1s: Vec<Vec<Float>>; // (NHOR,NLEP);
+    let zrl2s: Vec<Vec<Float>>; // (NHOR,NLEP);
 
     // layer transmissivity (down)
-    let ztb1: Vec<Vec<Float>>;// (NHOR,NLEV);
-    let ztb2: Vec<Vec<Float>>;// (NHOR,NLEV);
-    // layer transmissivity (up)
-    let ztb1u: Vec<Vec<Float>>;// (NHOR,NLEV);
-    let ztb2u: Vec<Vec<Float>>;// (NHOR,NLEV);
-    //  layer reflexivity (direct)
-    let zrb1: Vec<Vec<Float>>;// (NHOR,NLEV);
-    let zrb2: Vec<Vec<Float>>;// (NHOR,NLEV);
-    //  layer reflexibity (scattered)
-    let zrb1s: Vec<Vec<Float>>;// (NHOR,NLEV);
-    let zrb2s: Vec<Vec<Float>>;// (NHOR,NLEV);
+    let ztb1: Vec<Vec<Float>>; // (NHOR,NLEV);
+    let ztb2: Vec<Vec<Float>>; // (NHOR,NLEV);
+                               // layer transmissivity (up)
+    let ztb1u: Vec<Vec<Float>>; // (NHOR,NLEV);
+    let ztb2u: Vec<Vec<Float>>; // (NHOR,NLEV);
+                                //  layer reflexivity (direct)
+    let zrb1: Vec<Vec<Float>>; // (NHOR,NLEV);
+    let zrb2: Vec<Vec<Float>>; // (NHOR,NLEV);
+                               //  layer reflexibity (scattered)
+    let zrb1s: Vec<Vec<Float>>; // (NHOR,NLEV);
+    let zrb2s: Vec<Vec<Float>>; // (NHOR,NLEV);
 
-
-    let zo3l: Vec<Vec<Float>>;// (NHOR,NLEV); // ozon amount (top-l)
-    let zxo3l: Vec<Vec<Float>>;// (NHOR,NLEV); // effective ozon amount (top-l)
-    let zwvl: Vec<Vec<Float>>;// (NHOR,NLEV); // water vapor amount (top-l)
-    let zywvl: Vec<Vec<Float>>;// (NHOR,NLEV); // effective water vapor amount (top-l)
-    let zrcs: Vec<Vec<Float>>;// (NHOR,NLEV); // clear sky reflexivity (downward beam)
-    let zrcsu: Vec<Vec<Float>>;// (NHOR,NLEV); // clear sky reflexivity (upward beam)
+    let zo3l: Vec<Vec<Float>>; // (NHOR,NLEV); // ozon amount (top-l)
+    let zxo3l: Vec<Vec<Float>>; // (NHOR,NLEV); // effective ozon amount (top-l)
+    let zwvl: Vec<Vec<Float>>; // (NHOR,NLEV); // water vapor amount (top-l)
+    let zywvl: Vec<Vec<Float>>; // (NHOR,NLEV); // effective water vapor amount (top-l)
+    let zrcs: Vec<Vec<Float>>; // (NHOR,NLEV); // clear sky reflexivity (downward beam)
+    let zrcsu: Vec<Vec<Float>>; // (NHOR,NLEV); // clear sky reflexivity (upward beam)
 
     // top solar radiation
-    let zftop1: Vec<Float>;// (NHOR);
-    let zftop2: Vec<Float>;// (NHOR);
-    // upward fluxes
-    let zfu1: Vec<Float>;// (NHOR);
-    let zfu2: Vec<Float>;// (NHOR);
-    // downward fluxes
-    let zfd1: Vec<Float>;// (NHOR);
-    let zfd2: Vec<Float>;// (NHOR);
+    let zftop1: Vec<Float>; // (NHOR);
+    let zftop2: Vec<Float>; // (NHOR);
+                            // upward fluxes
+    let zfu1: Vec<Float>; // (NHOR);
+    let zfu2: Vec<Float>; // (NHOR);
+                          // downward fluxes
+    let zfd1: Vec<Float>; // (NHOR);
+    let zfd2: Vec<Float>; // (NHOR);
 
-    let mut zmu0: Vec<Float> = vec![0.; NHOR];// (NHOR); zenit angle
-    let mut zmu1: Vec<Float>;// (NHOR); zenit angle
-    let zcs: Vec<Float>;// (NHOR); clear sky part
-    let zm: Vec<Float>;// (NHOR); magnification factor
-    let zo3: Vec<Float>;// (NHOR); ozon amount
-    let zo3t: Vec<Float>;// (NHOR); total ozon amount (top-sfc)
-    let zxo3t: Vec<Float>;// (NHOR); effective total ozon amount (top-sfc)
+    let mut zmu0: Vec<Float> = vec![0.; NHOR]; // (NHOR); zenit angle
+    let mut zmu1: Vec<Float> = vec![0.; NHOR]; // (NHOR); zenit angle
+    let zcs: Vec<Float>; // (NHOR); clear sky part
+    let zm: Vec<Float>; // (NHOR); magnification factor
+    let zo3: Vec<Float>; // (NHOR); ozon amount
+    let zo3t: Vec<Float>; // (NHOR); total ozon amount (top-sfc)
+    let zxo3t: Vec<Float>; // (NHOR); effective total ozon amount (top-sfc)
 
     // ozon transmissivity (downward/upward beam)
-    let zto3: Vec<Float>;// (NHOR); zenit angle
-    let zto3u: Vec<Float>;// (NHOR); zenit angle
-    // total ozon transmissivities (d/u)
-    let zto3t: Vec<Float>;// (NHOR);
-    let zto3tu: Vec<Float>;// (NHOR);
+    let zto3: Vec<Float>; // (NHOR); zenit angle
+    let zto3u: Vec<Float>; // (NHOR); zenit angle
+                           // total ozon transmissivities (d/u)
+    let zto3t: Vec<Float>; // (NHOR);
+    let zto3tu: Vec<Float>; // (NHOR);
 
-    let zwv: Vec<Float>;// (NHOR); water vapor amount
-    let zwvt: Vec<Float>;// (NHOR); total water vapor amount (top-sfc)
-    let zywvt: Vec<Float>;// (NHOR); total effective water vapor amount (top-sfc)
+    let zwv: Vec<Float>; // (NHOR); water vapor amount
+    let zwvt: Vec<Float>; // (NHOR); total water vapor amount (top-sfc)
+    let zywvt: Vec<Float>; // (NHOR); total effective water vapor amount (top-sfc)
 
     // water vapor trasmissivity (d/u)
-    let ztwv: Vec<Float>;// (NHOR);
-    let ztwvu: Vec<Float>;// (NHOR);
-    // total water vapor transmissivities (d/u)
-    let ztwvt: Vec<Float>;// (NHOR);
-    let ztwvtu: Vec<Float>;//
+    let ztwv: Vec<Float>; // (NHOR);
+    let ztwvu: Vec<Float>; // (NHOR);
+                           // total water vapor transmissivities (d/u)
+    let ztwvt: Vec<Float>; // (NHOR);
+    let ztwvtu: Vec<Float>; //
 
     // reflexivities combined layer (direct)
-    let zra1: Vec<Float>;// (NHOR);
-    let zra2: Vec<Float>;// (NHOR);
-    // reflexivities combined layer (scatterd)
-    let zra1s: Vec<Float>;// (NHOR);
-    let zra2s: Vec<Float>;// (NHOR);
-    // transmissivities combined layer (di)
-    let zta1: Vec<Float>;// (NHOR);
-    let zta2: Vec<Float>;// (NHOR);
-    // transmissivities combined layer (sc)
-    let zta1s: Vec<Float>;// (NHOR);
-    let zta2s: Vec<Float>;// (NHOR);
+    let zra1: Vec<Float>; // (NHOR);
+    let zra2: Vec<Float>; // (NHOR);
+                          // reflexivities combined layer (scatterd)
+    let zra1s: Vec<Float>; // (NHOR);
+    let zra2s: Vec<Float>; // (NHOR);
+                           // transmissivities combined layer (di)
+    let zta1: Vec<Float>; // (NHOR);
+    let zta2: Vec<Float>; // (NHOR);
+                          // transmissivities combined layer (sc)
+    let zta1s: Vec<Float>; // (NHOR);
+    let zta2s: Vec<Float>; // (NHOR);
 
-    let z1mrabr: Vec<Float>;// (NHOR); 1/(1.-rb*ra(*))
+    let z1mrabr: Vec<Float>; // (NHOR); 1/(1.-rb*ra(*))
 
     // cloud reflexivities (direct)
-    let mut zrcl1: Vec<Vec<Float>>;// (NHOR,NLEV);
-    let zrcl2: Vec<Vec<Float>>;// (NHOR,NLEV);
-    // cloud reflexivities (scattered)
-    let mut zrcl1s: Vec<Vec<Float>> = vec![0.; NHOR];// (NHOR,NLEV);
-    let zrcl2s: Vec<Vec<Float>>;// (NHOR,NLEV);
-    // cloud transmissivities
-    let ztcl2: Vec<Vec<Float>>;// (NHOR,NLEV);
-    let ztcl2s: Vec<Vec<Float>>;// (NHOR,NLEV);
+    let mut zrcl1: Vec<Vec<Float>> = vec![vec![0.; NLEV]; NHOR]; // (NHOR,NLEV);
+    let zrcl2: Vec<Vec<Float>>; // (NHOR,NLEV);
+                                // cloud reflexivities (scattered)
+    let mut zrcl1s: Vec<Vec<Float>> = vec![vec![0.; NLEV]; NHOR]; // (NHOR,NLEV);
+    let zrcl2s: Vec<Vec<Float>>; // (NHOR,NLEV);
+                                 // cloud transmissivities
+    let ztcl2: Vec<Vec<Float>>; // (NHOR,NLEV);
+    let ztcl2s: Vec<Vec<Float>>; // (NHOR,NLEV);
 
     // arrays for diagnostic cloud properties
-    let zlwp: Vec<Float>;// (NHOR);
-    let ztau: Vec<Float>;// (NHOR);
-    let zlog: Vec<Float>;// (NHOR);
-    let zb2: Vec<Float>;// (NHOR);
-    let zom0: Vec<Float>;// (NHOR);
-    let zuz: Vec<Float>;// (NHOR);
-    let zun: Vec<Float>;// (NHOR);
-    let zr: Vec<Float>;// (NHOR);
-    let zexp: Vec<Float>;// (NHOR);
-    let zu: Vec<Float>;// (NHOR);
-    let zb1: Vec<Float>;// (NHOR);
+    let zlwp: Vec<Float>; // (NHOR);
+    let ztau: Vec<Float>; // (NHOR);
+    let zlog: Vec<Float>; // (NHOR);
+    let zb2: Vec<Float>; // (NHOR);
+    let zom0: Vec<Float>; // (NHOR);
+    let zuz: Vec<Float>; // (NHOR);
+    let zun: Vec<Float>; // (NHOR);
+    let zr: Vec<Float>; // (NHOR);
+    let zexp: Vec<Float>; // (NHOR);
+    let zu: Vec<Float>; // (NHOR);
+    let zb1: Vec<Float>; // (NHOR);
 
     let losun: Vec<bool>; // (NHOR) flag for gridpoints with insolation
 
     // cosine of zenith angle
 
-    if ndcycle == 0 {
+    if sim.rad.ndcycle == 0 {
         let mut js = 1;
         let mut je = NLON;
         for jlat in 1..NLPP {
             // TODO is this correctly translated
             // icnt = count(gmu0(js:je) > 0.0)
-            let icnt = rad.gmu0[js..je].iter().filter(|n| **n > 0.).count();
+            let icnt = sim.rad.gmu0[js..je].iter().filter(|n| **n > 0.).count();
             if icnt > 0 {
-                let zsum = rad.gmu0[js..je].iter().sum();
-                zmu0[js..je].iter_mut().map(|n| *n = zsum / icnt); // used for clouds
-                zmu1[js..je].iter_mut().map(|n| *n = zsum / NLON); // used for insolation
+                let zsum: Float = sim.rad.gmu0[js..je].iter().sum();
+                zmu0[js..je].iter_mut().map(|n| *n = zsum / icnt as Float); // used for clouds
+                zmu1[js..je].iter_mut().map(|n| *n = zsum / NLON as Float); // used for insolation
             } else {
                 zmu0[js..je].iter_mut().map(|n| *n = 0.0);
                 zmu1[js..je].iter_mut().map(|n| *n = 0.0);
@@ -461,350 +506,360 @@ fn swr(sim: &mut Sim) {
             js = js + NLON;
             je = je + NLON;
         } // jlat
-
     } else {
-        zmu0 = rad.gmu0;
-        zmu1 = rad.gmu0;
+        zmu0 = sim.rad.gmu0.clone();
+        zmu1 = sim.rad.gmu0.clone();
     } // (ndcycle == 0)
-
 
     // top solar radiation downward
     // zftop1(:) = zsolar1 * gsol0 * gdist2 * zmu1(:)
     // zftop2(:) = zsolar2 * gsol0 * gdist2 * zmu1(:)
-    zftop1 = zmu1.iter_mut().map(|mut n| n = n * (zsolar1 * sim.rad.gsol0 * sim.rad.gdist2)).collect();
-    zftop2 = zmu1.iter_mut().map(|mut n| n = n * (zsolar2 * sim.rad.gsol0 * sim.rad.gdist2)).collect();
-
+    zftop1 = zmu1
+        .iter_mut()
+        .map(|mut n| *n * (zsolar1 * sim.rad.gsol0 * sim.rad.gdist2))
+        .collect();
+    zftop2 = zmu1
+        .iter_mut()
+        .map(|mut n| *n * (zsolar2 * sim.rad.gsol0 * sim.rad.gdist2))
+        .collect();
 
     // from this point on, all computations are made only for
     // points with solar insolation > zero
 
     // losun(:) = (zftop1(:) + zftop2(:) > zero)
-    losun = vec![false; zftop1.len()].iter_mut().enumerate().map(|(i, n)| *n = (zftop1[i] + zftop2[i]) > 0.).collect();
+    losun = vec![false; zftop1.len()]
+        .iter_mut()
+        .enumerate()
+        .map(|(i, n)| (zftop1[i] + zftop2[i]) > 0.)
+        .collect();
 
     // cloud properites
 
-      zcs = vec![1.0; NHOR]; // Clear sky fraction (1.0 = clear sky)
-      let zmu00  = 0.5;
-      let zb3    = sim.rad.tswr1 * zmu00.sqrt() / zmu00;
-      let zb4    = sim.rad.tswr2 * zmu00.sqrt();
-      let zb5    = sim.rad.tswr3 * zmu00 * zmu00;
+    zcs = vec![1.0; NHOR]; // Clear sky fraction (1.0 = clear sky)
+    let zmu00: Float = 0.5;
+    let zb3 = sim.rad.tswr1 * zmu00.sqrt() / zmu00;
+    let zb4 = sim.rad.tswr2 * zmu00.sqrt();
+    let zb5 = sim.rad.tswr3 * zmu00 * zmu00;
 
     // prescribed
 
-    if nswrcl == 0 {
+    if sim.rad.nswrcl == 0 {
         for jlev in 1..NLEV {
             if sim.lev_arrays.sigma[jlev] <= 1. / 3. {
-                zrcl1s.iter_mut().map(|n| n[jlev] = sim.rad.rcl1[1] / (sim.rad.rcl1[1] + zmu00));
-                zrcl1.iter_mut().enumerate()
-                    .map(|(i, n)|
-                             n[jlev] = zcs[i] * sim.rad.rcl1[1]/(sim.rad.rcl1[1] + zmu0[i]) + (1. - zcs[i]) * zrcl1s[i][jlev]);
+                zrcl1s
+                    .iter_mut()
+                    .map(|n| n[jlev] = sim.rad.rcl1[1] / (sim.rad.rcl1[1] + zmu00));
+                zrcl1.iter_mut().enumerate().map(|(i, n)| {
+                    n[jlev] = zcs[i] * sim.rad.rcl1[1] / (sim.rad.rcl1[1] + zmu0[i])
+                        + (1. - zcs[i]) * zrcl1s[i][jlev]
+                });
             }
         }
     }
 
-      if (nswrcl == 0) then
-       do jlev=1,NLEV
-        if(sigma(jlev) <= 1./3.) then
-         zrcl1s(:,jlev)=rcl1(1)/(rcl1(1)+zmu00)
-         zrcl1(:,jlev)=zcs(:)*rcl1(1)/(rcl1(1)+zmu0(:))                 &
-     &                +(1.-zcs(:))*zrcl1s(:,jlev)
-         zrcl2s(:,jlev)=AMIN1(1.-acl2(1),rcl2(1)/(rcl2(1)+zmu00))
-         zrcl2(:,jlev)=AMIN1(1.-acl2(1),zcs(:)*rcl2(1)/(rcl2(1)+zmu0(:))&
-     &                                +(1.-zcs(:))*zrcl2s(:,jlev))
-         ztcl2s(:,jlev)=1.-zrcl2s(:,jlev)-acl2(1)
-         ztcl2(:,jlev)=1.-zrcl2(:,jlev)-acl2(1)
-        elseif(sigma(jlev) > 1./3. .and. sigma(jlev) <= 2./3.) then
-         zrcl1s(:,jlev)=rcl1(2)/(rcl1(2)+zmu00)
-         zrcl1(:,jlev)=zcs(:)*rcl1(2)/(rcl1(2)+zmu0(:))                 &
-     &                +(1.-zcs(:))*zrcl1s(:,jlev)
-         zrcl2s(:,jlev)=AMIN1(1.-acl2(2),rcl2(2)/(rcl2(2)+zmu00))
-         zrcl2(:,jlev)=AMIN1(1.-acl2(2),zcs(:)*rcl2(2)/(rcl2(2)+zmu0(:))&
-     &                                 +(1.-zcs(:))*zrcl2s(:,jlev))
-         ztcl2s(:,jlev)=1.-zrcl2s(:,jlev)-acl2(2)
-         ztcl2(:,jlev)=1.-zrcl2(:,jlev)-acl2(2)
-        else
-         zrcl1s(:,jlev)=rcl1(3)/(rcl1(3)+zmu00)
-         zrcl1(:,jlev)=zcs(:)*rcl1(3)/(rcl1(3)+zmu0(:))                 &
-     &                +(1.-zcs(:))*zrcl1s(:,jlev)
-         zrcl2s(:,jlev)=AMIN1(1.-acl2(3),rcl2(3)/(rcl2(3)+zmu00))
-         zrcl2(:,jlev)=AMIN1(1.-acl2(3),zcs(:)*rcl2(3)/(rcl2(3)+zmu0(:))&
-     &                                 +(1.-zcs(:))*zrcl2s(:,jlev))
-         ztcl2s(:,jlev)=1.-zrcl2s(:,jlev)-acl2(3)
-         ztcl2(:,jlev)=1.-zrcl2(:,jlev)-acl2(3)
-        endif
-        zcs(:)=zcs(:)*(1.-dcc(:,jlev))
-       enddo
-      else
-       zrcl1(:,:)=0.0
-       zrcl2(:,:)=0.0
-       ztcl2(:,:)=1.0
-       zrcl1s(:,:)=0.0
-       zrcl2s(:,:)=0.0
-       ztcl2s(:,:)=1.0
-       do jlev=1,NLEV
-        where(losun(:) .and. (dcc(:,jlev) > 0.))
-         zlwp(:) = min(1000.0,1000.*dql(:,jlev)*dp(:)/ga*dsigma(jlev))
-         ztau(:) = 2.0 * ALOG10(zlwp(:)+1.5)**3.9
-         zlog(:) = log(1000.0 / ztau(:))
-         zb2(:)  = zb4 / ALOG(3.+0.1*ztau(:))
-         zom0(:) = min(0.9999,1.0 - zb5 * zlog(:))
-         zun(:)  = 1.0 - zom0(:)
-         zuz(:)  = zun(:) + 2.0 * zb2(:) * zom0(:)
-         zu(:)   = SQRT(zuz(:)/zun(:))
-         zexp(:) = exp(min(25.0,ztau(:)*SQRT(zuz(:)*zun(:))/zmu00))
-         zr(:)   = (zu(:)+1.)*(zu(:)+1.)*zexp(:)                      &
-     &           - (zu(:)-1.)*(zu(:)-1.)/zexp(:)
-         zrcl1s(:,jlev)=1.-1./(1.+zb3*ztau(:))
-         ztcl2s(:,jlev)=4.*zu(:)/zr(:)
-         zrcl2s(:,jlev)=(zu(:)*zu(:)-1.)/zr(:)*(zexp(:)-1./zexp(:))
-
-         zb1(:)  = tswr1*SQRT(zmu0(:))
-         zb2(:)  = tswr2*SQRT(zmu0(:))/ALOG(3.+0.1*ztau(:))
-         zom0(:) = min(0.9999,1.-tswr3*zmu0(:)*zmu0(:)*zlog(:))
-         zun(:)  = 1.0 - zom0(:)
-         zuz(:)  = zun(:) + 2.0 * zb2(:) * zom0(:)
-         zu(:)   = SQRT(zuz(:)/zun(:))
-         zexp(:) = exp(min(25.0,ztau(:)*SQRT(zuz(:)*zun(:))/zmu0(:)))
-         zr(:)   = (zu(:)+1.)*(zu(:)+1.)*zexp(:)                      &
-     &           - (zu(:)-1.)*(zu(:)-1.)/zexp(:)
-         zrcl1(:,jlev)=1.-1./(1.+zb1(:)*ztau(:)/zmu0(:))
-         ztcl2(:,jlev)=4.*zu(:)/zr(:)
-         zrcl2(:,jlev)=(zu(:)*zu(:)-1.)/zr(:)*(zexp(:)-1./zexp(:))
-         zrcl1(:,jlev)=zcs(:)*zrcl1(:,jlev)+(1.-zcs(:))*zrcl1s(:,jlev)
-         ztcl2(:,jlev)=zcs(:)*ztcl2(:,jlev)+(1.-zcs(:))*ztcl2s(:,jlev)
-         zrcl2(:,jlev)=zcs(:)*zrcl2(:,jlev)+(1.-zcs(:))*zrcl2s(:,jlev)
-        endwhere
-        zcs(:)=zcs(:)*(1.-dcc(:,jlev))
-       enddo ! jlev
-      endif ! (nswrcl == 0)
-
-    // magnification factor
-
-      where(losun(:))
-       zm(:)=35./SQRT(1.+1224.*zmu0(:)*zmu0(:))
-
-    // absorber amount and clear sky fraction
-
-       zcs(:)=1.
-       zo3t(:)=0.
-       zxo3t(:)=0.
-       zwvt(:)=0.
-       zywvt(:)=0.
-      endwhere
-      do jlev=1,NLEV
-       where(losun(:))
-        zo3(:)=zfo3*dsigma(jlev)*dp(:)*dqo3(:,jlev)/ga
-        zo3t(:)=zo3t(:)+zo3(:)
-        zxo3t(:)=zcs(:)*(zxo3t(:)+zm(:)*zo3(:))                         &
-     &          +(1.-zcs(:))*(zxo3t(:)+zmbar*zo3(:))
-        zo3l(:,jlev)=zo3t(:)
-        zxo3l(:,jlev)=zxo3t(:)
-        zwv(:)=0.1*dsigma(jlev)*dq(:,jlev)*dp(:)/ga                     &
-     &        *SQRT(273./dt(:,jlev))*sigma(jlev)*dp(:)/100000.
-        zwvt(:)=zwvt(:)+zwv(:)
-        zywvt(:)=zcs(:)*(zywvt(:)+zm(:)*zwv(:))                         &
-     &          +(1.-zcs(:))*(zywvt(:)+zbetta*zwv(:))
-        zwvl(:,jlev)=zwvt(:)
-        zywvl(:,jlev)=zywvt(:)
-        zcs(:)=zcs(:)*(1.-dcc(:,jlev))
-        zrcs(:,jlev)=0.
-        zrcsu(:,jlev)=0.
-       endwhere
-      end do
-
-    // compute optical properties
+    //       if (nswrcl == 0) then
+    //        do jlev=1,NLEV
+    //         if(sigma(jlev) <= 1./3.) then
+    //          zrcl1s(:,jlev)=rcl1(1)/(rcl1(1)+zmu00)
+    //          zrcl1(:,jlev)=zcs(:)*rcl1(1)/(rcl1(1)+zmu0(:))                 &
+    //      &                +(1.-zcs(:))*zrcl1s(:,jlev)
+    //          zrcl2s(:,jlev)=AMIN1(1.-acl2(1),rcl2(1)/(rcl2(1)+zmu00))
+    //          zrcl2(:,jlev)=AMIN1(1.-acl2(1),zcs(:)*rcl2(1)/(rcl2(1)+zmu0(:))&
+    //      &                                +(1.-zcs(:))*zrcl2s(:,jlev))
+    //          ztcl2s(:,jlev)=1.-zrcl2s(:,jlev)-acl2(1)
+    //          ztcl2(:,jlev)=1.-zrcl2(:,jlev)-acl2(1)
+    //         elseif(sigma(jlev) > 1./3. .and. sigma(jlev) <= 2./3.) then
+    //          zrcl1s(:,jlev)=rcl1(2)/(rcl1(2)+zmu00)
+    //          zrcl1(:,jlev)=zcs(:)*rcl1(2)/(rcl1(2)+zmu0(:))                 &
+    //      &                +(1.-zcs(:))*zrcl1s(:,jlev)
+    //          zrcl2s(:,jlev)=AMIN1(1.-acl2(2),rcl2(2)/(rcl2(2)+zmu00))
+    //          zrcl2(:,jlev)=AMIN1(1.-acl2(2),zcs(:)*rcl2(2)/(rcl2(2)+zmu0(:))&
+    //      &                                 +(1.-zcs(:))*zrcl2s(:,jlev))
+    //          ztcl2s(:,jlev)=1.-zrcl2s(:,jlev)-acl2(2)
+    //          ztcl2(:,jlev)=1.-zrcl2(:,jlev)-acl2(2)
+    //         else
+    //          zrcl1s(:,jlev)=rcl1(3)/(rcl1(3)+zmu00)
+    //          zrcl1(:,jlev)=zcs(:)*rcl1(3)/(rcl1(3)+zmu0(:))                 &
+    //      &                +(1.-zcs(:))*zrcl1s(:,jlev)
+    //          zrcl2s(:,jlev)=AMIN1(1.-acl2(3),rcl2(3)/(rcl2(3)+zmu00))
+    //          zrcl2(:,jlev)=AMIN1(1.-acl2(3),zcs(:)*rcl2(3)/(rcl2(3)+zmu0(:))&
+    //      &                                 +(1.-zcs(:))*zrcl2s(:,jlev))
+    //          ztcl2s(:,jlev)=1.-zrcl2s(:,jlev)-acl2(3)
+    //          ztcl2(:,jlev)=1.-zrcl2(:,jlev)-acl2(3)
+    //         endif
+    //         zcs(:)=zcs(:)*(1.-dcc(:,jlev))
+    //        enddo
+    //       else
+    //        zrcl1(:,:)=0.0
+    //        zrcl2(:,:)=0.0
+    //        ztcl2(:,:)=1.0
+    //        zrcl1s(:,:)=0.0
+    //        zrcl2s(:,:)=0.0
+    //        ztcl2s(:,:)=1.0
+    //        do jlev=1,NLEV
+    //         where(losun(:) .and. (dcc(:,jlev) > 0.))
+    //          zlwp(:) = min(1000.0,1000.*dql(:,jlev)*dp(:)/ga*dsigma(jlev))
+    //          ztau(:) = 2.0 * ALOG10(zlwp(:)+1.5)**3.9
+    //          zlog(:) = log(1000.0 / ztau(:))
+    //          zb2(:)  = zb4 / ALOG(3.+0.1*ztau(:))
+    //          zom0(:) = min(0.9999,1.0 - zb5 * zlog(:))
+    //          zun(:)  = 1.0 - zom0(:)
+    //          zuz(:)  = zun(:) + 2.0 * zb2(:) * zom0(:)
+    //          zu(:)   = SQRT(zuz(:)/zun(:))
+    //          zexp(:) = exp(min(25.0,ztau(:)*SQRT(zuz(:)*zun(:))/zmu00))
+    //          zr(:)   = (zu(:)+1.)*(zu(:)+1.)*zexp(:)                      &
+    //      &           - (zu(:)-1.)*(zu(:)-1.)/zexp(:)
+    //          zrcl1s(:,jlev)=1.-1./(1.+zb3*ztau(:))
+    //          ztcl2s(:,jlev)=4.*zu(:)/zr(:)
+    //          zrcl2s(:,jlev)=(zu(:)*zu(:)-1.)/zr(:)*(zexp(:)-1./zexp(:))
     //
-    // downward loop
+    //          zb1(:)  = tswr1*SQRT(zmu0(:))
+    //          zb2(:)  = tswr2*SQRT(zmu0(:))/ALOG(3.+0.1*ztau(:))
+    //          zom0(:) = min(0.9999,1.-tswr3*zmu0(:)*zmu0(:)*zlog(:))
+    //          zun(:)  = 1.0 - zom0(:)
+    //          zuz(:)  = zun(:) + 2.0 * zb2(:) * zom0(:)
+    //          zu(:)   = SQRT(zuz(:)/zun(:))
+    //          zexp(:) = exp(min(25.0,ztau(:)*SQRT(zuz(:)*zun(:))/zmu0(:)))
+    //          zr(:)   = (zu(:)+1.)*(zu(:)+1.)*zexp(:)                      &
+    //      &           - (zu(:)-1.)*(zu(:)-1.)/zexp(:)
+    //          zrcl1(:,jlev)=1.-1./(1.+zb1(:)*ztau(:)/zmu0(:))
+    //          ztcl2(:,jlev)=4.*zu(:)/zr(:)
+    //          zrcl2(:,jlev)=(zu(:)*zu(:)-1.)/zr(:)*(zexp(:)-1./zexp(:))
+    //          zrcl1(:,jlev)=zcs(:)*zrcl1(:,jlev)+(1.-zcs(:))*zrcl1s(:,jlev)
+    //          ztcl2(:,jlev)=zcs(:)*ztcl2(:,jlev)+(1.-zcs(:))*ztcl2s(:,jlev)
+    //          zrcl2(:,jlev)=zcs(:)*zrcl2(:,jlev)+(1.-zcs(:))*zrcl2s(:,jlev)
+    //         endwhere
+    //         zcs(:)=zcs(:)*(1.-dcc(:,jlev))
+    //        enddo ! jlev
+    //       endif ! (nswrcl == 0)
     //
-    // preset
-
-      where(losun(:))
-       zta1(:)=1.
-       zta1s(:)=1.
-       zra1(:)=0.
-       zra1s(:)=0.
-       zta2(:)=1.
-       zta2s(:)=1.
-       zra2(:)=0.
-       zra2s(:)=0.
-!
-       zto3t(:)=1.
-       zo3(:)=zxo3t(:)+zmbar*zo3t(:)
-       zto3tu(:)=1.                                                     &
-     &          -(0.02118*zo3(:)/(1.+0.042*zo3(:)+0.000323*zo3(:)**2)   &
-     &           +1.082*zo3(:)/((1.+138.6*zo3(:))**0.805)               &
-     &           +0.0658*zo3(:)/(1.+(103.6*zo3(:))**3))/zsolar1
-       ztwvt(:)=1.
-       zwv(:)=zywvt(:)+zbetta*zwvt(:)
-       ztwvtu(:)=1.-2.9*zwv(:)/((1.+141.5*zwv(:))**0.635+5.925*zwv(:))  &
-     &            /zsolar2
-!
-!     clear sky scattering (Rayleigh scatterin lower most level only)
-!
-       zrcs(:,NLEV)=(0.219/(1.+0.816*zmu0(:))*zcs(:)                    &
-     &              +0.144*(1.-zcs(:)-dcc(:,NLEV)))*nrscat
-       zrcsu(:,NLEV)=0.144*(1.-dcc(:,NLEV))*nrscat
-      endwhere
-!
-      do jlev=1,NLEV
-       where(losun(:))
-        zt1(:,jlev)=zta1(:)
-        zt2(:,jlev)=zta2(:)
-        zr1s(:,jlev)=zra1s(:)
-        zr2s(:,jlev)=zra2s(:)
-!
-!     set single layer R and T:
-!
-!     1. spectral range 1:
-!
-!     a) R
-!     clear part: rayleigh scattering (only lowermost level)
-!     cloudy part: cloud albedo
-!
-        zrb1(:,jlev)=zrcs(:,jlev)+zrcl1(:,jlev)*dcc(:,jlev)
-        zrb1s(:,jlev)=zrcsu(:,jlev)+zrcl1s(:,jlev)*dcc(:,jlev)
-!
-!     b) T
-!
-!     ozon absorption
-!
-!     downward beam
-!
-        zo3(:)=zxo3l(:,jlev)
-        zto3(:)=(1.                                                     &
-     &          -(0.02118*zo3(:)/(1.+0.042*zo3(:)+0.000323*zo3(:)**2)   &
-     &           +1.082*zo3(:)/((1.+138.6*zo3(:))**0.805)               &
-     &           +0.0658*zo3(:)/(1.+(103.6*zo3(:))**3))/zsolar1)        &
-     &         /zto3t(:)
-        zto3t(:)=zto3t(:)*zto3(:)
-!
-!     upward scattered beam
-!
-        zo3(:)=zxo3t(:)+zmbar*(zo3t(:)-zo3l(:,jlev))
-        zto3u(:)=zto3tu(:)                                              &
-     &         /(1.-(0.02118*zo3(:)/(1.+0.042*zo3(:)+0.000323*zo3(:)**2)&
-     &              +1.082*zo3(:)/((1.+138.6*zo3(:))**0.805)            &
-     &              +0.0658*zo3(:)/(1.+(103.6*zo3(:))**3))/zsolar1)
-        zto3tu(:)=zto3tu(:)/zto3u(:)
-!
-!     total T = 1-(A(ozon)+R(rayl.))*(1-dcc)-R(cloud)*dcc
-!
-        ztb1(:,jlev)=1.-(1.-zto3(:))*(1.-dcc(:,jlev))-zrb1(:,jlev)
-        ztb1u(:,jlev)=1.-(1.-zto3u(:))*(1.-dcc(:,jlev))-zrb1s(:,jlev)
-!
-!     make combined layer R_ab, R_abs, T_ab and T_abs
-!
-        z1mrabr(:)=1./(1.-zra1s(:)*zrb1s(:,jlev))
-        zra1(:)=zra1(:)+zta1(:)*zrb1(:,jlev)*zta1s(:)*z1mrabr(:)
-        zta1(:)=zta1(:)*ztb1(:,jlev)*z1mrabr(:)
-        zra1s(:)=zrb1s(:,jlev)+ztb1u(:,jlev)*zra1s(:)*ztb1(:,jlev)      &
-     &                        *z1mrabr(:)
-        zta1s(:)=ztb1u(:,jlev)*zta1s(:)*z1mrabr(:)
-!
-!     2. spectral range 2:
-!
-!     a) R
-!
-!     cloud albedo
-!
-        zrb2(:,jlev)=zrcl2(:,jlev)*dcc(:,jlev)
-        zrb2s(:,jlev)=zrcl2s(:,jlev)*dcc(:,jlev)
-!
-!     b) T
-!
-!     water vapor absorption
-!
-!     downward beam
-!
-       zwv(:)=zywvl(:,jlev)
-       ztwv(:)=(1.-2.9*zwv(:)/((1.+141.5*zwv(:))**0.635+5.925*zwv(:))   &
-     &            /zsolar2)                                             &
-     &        /ztwvt(:)
-       ztwvt(:)=ztwvt(:)*ztwv(:)
-!
-!     upward scattered beam
-!
-       zwv(:)=zywvt(:)+zbetta*(zwvt(:)-zwvl(:,jlev))
-       ztwvu(:)=ztwvtu(:)                                               &
-     &         /(1.-2.9*zwv(:)/((1.+141.5*zwv(:))**0.635+5.925*zwv(:))  &
-     &            /zsolar2)
-       ztwvtu(:)=ztwvtu(:)/ztwvu(:)
-!
-!     total T = 1-A(water vapor)*(1.-dcc)-(A(cloud)+R(cloud))*dcc
-!
-        ztb2(:,jlev)=1.-(1.-ztwv(:))*(1.-dcc(:,jlev))                   &
-     &              -(1.-ztcl2(:,jlev))*dcc(:,jlev)
-        ztb2u(:,jlev)=1.-(1.-ztwvu(:))*(1.-dcc(:,jlev))                 &
-     &               -(1.-ztcl2s(:,jlev))*dcc(:,jlev)
-!
-!     make combined layer R_ab, R_abs, T_ab and T_abs
-!
-        z1mrabr(:)=1./(1.-zra2s(:)*zrb2s(:,jlev))
-        zra2(:)=zra2(:)+zta2(:)*zrb2(:,jlev)*zta2s(:)*z1mrabr(:)
-        zta2(:)=zta2(:)*ztb2(:,jlev)*z1mrabr(:)
-        zra2s(:)=zrb2s(:,jlev)+ztb2u(:,jlev)*zra2s(:)*ztb2(:,jlev)      &
-     &                       *z1mrabr(:)
-        zta2s(:)=ztb2u(:,jlev)*zta2s(:)*z1mrabr(:)
-       endwhere
-      enddo
-      where(losun(:))
-       zt1(:,NLEP)=zta1(:)
-       zt2(:,NLEP)=zta2(:)
-       zr1s(:,NLEP)=zra1s(:)
-       zr2s(:,NLEP)=zra2s(:)
-!
-!     upward loop
-!
-!     make upward R
-!
-       zra1s(:)=dalb(:)
-       zra2s(:)=dalb(:)
-!
-!      set albedo for the direct beam (for ocean use ECHAM3 param)
-!
-       dalb(:)=dls(:)*dalb(:)+(1.-dls(:))*dicec(:)*dalb(:)              &
-     &        +(1.-dls(:))*(1.-dicec(:))*AMIN1(0.05/(zmu0(:)+0.15),0.15)
-       zra1(:)=dalb(:)
-       zra2(:)=dalb(:)
-      endwhere
-      do jlev=NLEV,1,-1
-       where(losun(:))
-        zrl1(:,jlev+1)=zra1(:)
-        zrl2(:,jlev+1)=zra2(:)
-        zrl1s(:,jlev+1)=zra1s(:)
-        zrl2s(:,jlev+1)=zra2s(:)
-        zra1(:)=zrb1(:,jlev)+ztb1(:,jlev)*zra1(:)*ztb1u(:,jlev)         &
-     &                      /(1.-zra1s(:)*zrb1s(:,jlev))
-        zra1s(:)=zrb1s(:,jlev)+ztb1u(:,jlev)*zra1s(:)*ztb1u(:,jlev)     &
-     &                        /(1.-zra1s(:)*zrb1s(:,jlev))
-        zra2(:)=zrb2(:,jlev)+ztb2(:,jlev)*zra2(:)*ztb2u(:,jlev)         &
-     &                      /(1.-zra2s(:)*zrb2s(:,jlev))
-        zra2s(:)=zrb2s(:,jlev)+ztb2u(:,jlev)*zra2s(:)*ztb2u(:,jlev)     &
-     &                        /(1.-zra2s(:)*zrb2s(:,jlev))
-       endwhere
-      enddo
-      where(losun(:))
-       zrl1(:,1)=zra1(:)
-       zrl2(:,1)=zra2(:)
-       zrl1s(:,1)=zra1s(:)
-       zrl2s(:,1)=zra2s(:)
-      endwhere
-!
-!     fluxes at layer interfaces
-!
-      do jlev=1,NLEP
-       where(losun(:))
-        z1mrabr(:)=1./(1.-zr1s(:,jlev)*zrl1s(:,jlev))
-        zfd1(:)=zt1(:,jlev)*z1mrabr(:)
-        zfu1(:)=-zt1(:,jlev)*zrl1(:,jlev)*z1mrabr(:)
-        z1mrabr(:)=1./(1.-zr2s(:,jlev)*zrl2s(:,jlev))
-        zfd2(:)=zt2(:,jlev)*z1mrabr(:)
-        zfu2(:)=-zt2(:,jlev)*zrl2(:,jlev)*z1mrabr(:)
-        dfu(:,jlev)=zfu1(:)*zftop1(:)+zfu2(:)*zftop2(:)
-        dfd(:,jlev)=zfd1(:)*zftop1(:)+zfd2(:)*zftop2(:)
-        dswfl(:,jlev)=dfu(:,jlev)+dfd(:,jlev)
-       endwhere
-      enddo
+    //     // magnification factor
+    //
+    //       where(losun(:))
+    //        zm(:)=35./SQRT(1.+1224.*zmu0(:)*zmu0(:))
+    //
+    //     // absorber amount and clear sky fraction
+    //
+    //        zcs(:)=1.
+    //        zo3t(:)=0.
+    //        zxo3t(:)=0.
+    //        zwvt(:)=0.
+    //        zywvt(:)=0.
+    //       endwhere
+    //       do jlev=1,NLEV
+    //        where(losun(:))
+    //         zo3(:)=zfo3*dsigma(jlev)*dp(:)*dqo3(:,jlev)/ga
+    //         zo3t(:)=zo3t(:)+zo3(:)
+    //         zxo3t(:)=zcs(:)*(zxo3t(:)+zm(:)*zo3(:))                         &
+    //      &          +(1.-zcs(:))*(zxo3t(:)+zmbar*zo3(:))
+    //         zo3l(:,jlev)=zo3t(:)
+    //         zxo3l(:,jlev)=zxo3t(:)
+    //         zwv(:)=0.1*dsigma(jlev)*dq(:,jlev)*dp(:)/ga                     &
+    //      &        *SQRT(273./dt(:,jlev))*sigma(jlev)*dp(:)/100000.
+    //         zwvt(:)=zwvt(:)+zwv(:)
+    //         zywvt(:)=zcs(:)*(zywvt(:)+zm(:)*zwv(:))                         &
+    //      &          +(1.-zcs(:))*(zywvt(:)+zbetta*zwv(:))
+    //         zwvl(:,jlev)=zwvt(:)
+    //         zywvl(:,jlev)=zywvt(:)
+    //         zcs(:)=zcs(:)*(1.-dcc(:,jlev))
+    //         zrcs(:,jlev)=0.
+    //         zrcsu(:,jlev)=0.
+    //        endwhere
+    //       end do
+    //
+    //     // compute optical properties
+    //     //
+    //     // downward loop
+    //     //
+    //     // preset
+    //
+    //       where(losun(:))
+    //        zta1(:)=1.
+    //        zta1s(:)=1.
+    //        zra1(:)=0.
+    //        zra1s(:)=0.
+    //        zta2(:)=1.
+    //        zta2s(:)=1.
+    //        zra2(:)=0.
+    //        zra2s(:)=0.
+    // !
+    //        zto3t(:)=1.
+    //        zo3(:)=zxo3t(:)+zmbar*zo3t(:)
+    //        zto3tu(:)=1.                                                     &
+    //      &          -(0.02118*zo3(:)/(1.+0.042*zo3(:)+0.000323*zo3(:)**2)   &
+    //      &           +1.082*zo3(:)/((1.+138.6*zo3(:))**0.805)               &
+    //      &           +0.0658*zo3(:)/(1.+(103.6*zo3(:))**3))/zsolar1
+    //        ztwvt(:)=1.
+    //        zwv(:)=zywvt(:)+zbetta*zwvt(:)
+    //        ztwvtu(:)=1.-2.9*zwv(:)/((1.+141.5*zwv(:))**0.635+5.925*zwv(:))  &
+    //      &            /zsolar2
+    // !
+    // !     clear sky scattering (Rayleigh scatterin lower most level only)
+    // !
+    //        zrcs(:,NLEV)=(0.219/(1.+0.816*zmu0(:))*zcs(:)                    &
+    //      &              +0.144*(1.-zcs(:)-dcc(:,NLEV)))*nrscat
+    //        zrcsu(:,NLEV)=0.144*(1.-dcc(:,NLEV))*nrscat
+    //       endwhere
+    // !
+    //       do jlev=1,NLEV
+    //        where(losun(:))
+    //         zt1(:,jlev)=zta1(:)
+    //         zt2(:,jlev)=zta2(:)
+    //         zr1s(:,jlev)=zra1s(:)
+    //         zr2s(:,jlev)=zra2s(:)
+    // !
+    // !     set single layer R and T:
+    // !
+    // !     1. spectral range 1:
+    // !
+    // !     a) R
+    // !     clear part: rayleigh scattering (only lowermost level)
+    // !     cloudy part: cloud albedo
+    // !
+    //         zrb1(:,jlev)=zrcs(:,jlev)+zrcl1(:,jlev)*dcc(:,jlev)
+    //         zrb1s(:,jlev)=zrcsu(:,jlev)+zrcl1s(:,jlev)*dcc(:,jlev)
+    // !
+    // !     b) T
+    // !
+    // !     ozon absorption
+    // !
+    // !     downward beam
+    // !
+    //         zo3(:)=zxo3l(:,jlev)
+    //         zto3(:)=(1.                                                     &
+    //      &          -(0.02118*zo3(:)/(1.+0.042*zo3(:)+0.000323*zo3(:)**2)   &
+    //      &           +1.082*zo3(:)/((1.+138.6*zo3(:))**0.805)               &
+    //      &           +0.0658*zo3(:)/(1.+(103.6*zo3(:))**3))/zsolar1)        &
+    //      &         /zto3t(:)
+    //         zto3t(:)=zto3t(:)*zto3(:)
+    // !
+    // !     upward scattered beam
+    // !
+    //         zo3(:)=zxo3t(:)+zmbar*(zo3t(:)-zo3l(:,jlev))
+    //         zto3u(:)=zto3tu(:)                                              &
+    //      &         /(1.-(0.02118*zo3(:)/(1.+0.042*zo3(:)+0.000323*zo3(:)**2)&
+    //      &              +1.082*zo3(:)/((1.+138.6*zo3(:))**0.805)            &
+    //      &              +0.0658*zo3(:)/(1.+(103.6*zo3(:))**3))/zsolar1)
+    //         zto3tu(:)=zto3tu(:)/zto3u(:)
+    // !
+    // !     total T = 1-(A(ozon)+R(rayl.))*(1-dcc)-R(cloud)*dcc
+    // !
+    //         ztb1(:,jlev)=1.-(1.-zto3(:))*(1.-dcc(:,jlev))-zrb1(:,jlev)
+    //         ztb1u(:,jlev)=1.-(1.-zto3u(:))*(1.-dcc(:,jlev))-zrb1s(:,jlev)
+    // !
+    // !     make combined layer R_ab, R_abs, T_ab and T_abs
+    // !
+    //         z1mrabr(:)=1./(1.-zra1s(:)*zrb1s(:,jlev))
+    //         zra1(:)=zra1(:)+zta1(:)*zrb1(:,jlev)*zta1s(:)*z1mrabr(:)
+    //         zta1(:)=zta1(:)*ztb1(:,jlev)*z1mrabr(:)
+    //         zra1s(:)=zrb1s(:,jlev)+ztb1u(:,jlev)*zra1s(:)*ztb1(:,jlev)      &
+    //      &                        *z1mrabr(:)
+    //         zta1s(:)=ztb1u(:,jlev)*zta1s(:)*z1mrabr(:)
+    // !
+    // !     2. spectral range 2:
+    // !
+    // !     a) R
+    // !
+    // !     cloud albedo
+    // !
+    //         zrb2(:,jlev)=zrcl2(:,jlev)*dcc(:,jlev)
+    //         zrb2s(:,jlev)=zrcl2s(:,jlev)*dcc(:,jlev)
+    // !
+    // !     b) T
+    // !
+    // !     water vapor absorption
+    // !
+    // !     downward beam
+    // !
+    //        zwv(:)=zywvl(:,jlev)
+    //        ztwv(:)=(1.-2.9*zwv(:)/((1.+141.5*zwv(:))**0.635+5.925*zwv(:))   &
+    //      &            /zsolar2)                                             &
+    //      &        /ztwvt(:)
+    //        ztwvt(:)=ztwvt(:)*ztwv(:)
+    // !
+    // !     upward scattered beam
+    // !
+    //        zwv(:)=zywvt(:)+zbetta*(zwvt(:)-zwvl(:,jlev))
+    //        ztwvu(:)=ztwvtu(:)                                               &
+    //      &         /(1.-2.9*zwv(:)/((1.+141.5*zwv(:))**0.635+5.925*zwv(:))  &
+    //      &            /zsolar2)
+    //        ztwvtu(:)=ztwvtu(:)/ztwvu(:)
+    // !
+    // !     total T = 1-A(water vapor)*(1.-dcc)-(A(cloud)+R(cloud))*dcc
+    // !
+    //         ztb2(:,jlev)=1.-(1.-ztwv(:))*(1.-dcc(:,jlev))                   &
+    //      &              -(1.-ztcl2(:,jlev))*dcc(:,jlev)
+    //         ztb2u(:,jlev)=1.-(1.-ztwvu(:))*(1.-dcc(:,jlev))                 &
+    //      &               -(1.-ztcl2s(:,jlev))*dcc(:,jlev)
+    // !
+    // !     make combined layer R_ab, R_abs, T_ab and T_abs
+    // !
+    //         z1mrabr(:)=1./(1.-zra2s(:)*zrb2s(:,jlev))
+    //         zra2(:)=zra2(:)+zta2(:)*zrb2(:,jlev)*zta2s(:)*z1mrabr(:)
+    //         zta2(:)=zta2(:)*ztb2(:,jlev)*z1mrabr(:)
+    //         zra2s(:)=zrb2s(:,jlev)+ztb2u(:,jlev)*zra2s(:)*ztb2(:,jlev)      &
+    //      &                       *z1mrabr(:)
+    //         zta2s(:)=ztb2u(:,jlev)*zta2s(:)*z1mrabr(:)
+    //        endwhere
+    //       enddo
+    //       where(losun(:))
+    //        zt1(:,NLEP)=zta1(:)
+    //        zt2(:,NLEP)=zta2(:)
+    //        zr1s(:,NLEP)=zra1s(:)
+    //        zr2s(:,NLEP)=zra2s(:)
+    // !
+    // !     upward loop
+    // !
+    // !     make upward R
+    // !
+    //        zra1s(:)=dalb(:)
+    //        zra2s(:)=dalb(:)
+    // !
+    // !      set albedo for the direct beam (for ocean use ECHAM3 param)
+    // !
+    //        dalb(:)=dls(:)*dalb(:)+(1.-dls(:))*dicec(:)*dalb(:)              &
+    //      &        +(1.-dls(:))*(1.-dicec(:))*AMIN1(0.05/(zmu0(:)+0.15),0.15)
+    //        zra1(:)=dalb(:)
+    //        zra2(:)=dalb(:)
+    //       endwhere
+    //       do jlev=NLEV,1,-1
+    //        where(losun(:))
+    //         zrl1(:,jlev+1)=zra1(:)
+    //         zrl2(:,jlev+1)=zra2(:)
+    //         zrl1s(:,jlev+1)=zra1s(:)
+    //         zrl2s(:,jlev+1)=zra2s(:)
+    //         zra1(:)=zrb1(:,jlev)+ztb1(:,jlev)*zra1(:)*ztb1u(:,jlev)         &
+    //      &                      /(1.-zra1s(:)*zrb1s(:,jlev))
+    //         zra1s(:)=zrb1s(:,jlev)+ztb1u(:,jlev)*zra1s(:)*ztb1u(:,jlev)     &
+    //      &                        /(1.-zra1s(:)*zrb1s(:,jlev))
+    //         zra2(:)=zrb2(:,jlev)+ztb2(:,jlev)*zra2(:)*ztb2u(:,jlev)         &
+    //      &                      /(1.-zra2s(:)*zrb2s(:,jlev))
+    //         zra2s(:)=zrb2s(:,jlev)+ztb2u(:,jlev)*zra2s(:)*ztb2u(:,jlev)     &
+    //      &                        /(1.-zra2s(:)*zrb2s(:,jlev))
+    //        endwhere
+    //       enddo
+    //       where(losun(:))
+    //        zrl1(:,1)=zra1(:)
+    //        zrl2(:,1)=zra2(:)
+    //        zrl1s(:,1)=zra1s(:)
+    //        zrl2s(:,1)=zra2s(:)
+    //       endwhere
+    // !
+    // !     fluxes at layer interfaces
+    // !
+    //       do jlev=1,NLEP
+    //        where(losun(:))
+    //         z1mrabr(:)=1./(1.-zr1s(:,jlev)*zrl1s(:,jlev))
+    //         zfd1(:)=zt1(:,jlev)*z1mrabr(:)
+    //         zfu1(:)=-zt1(:,jlev)*zrl1(:,jlev)*z1mrabr(:)
+    //         z1mrabr(:)=1./(1.-zr2s(:,jlev)*zrl2s(:,jlev))
+    //         zfd2(:)=zt2(:,jlev)*z1mrabr(:)
+    //         zfu2(:)=-zt2(:,jlev)*zrl2(:,jlev)*z1mrabr(:)
+    //         dfu(:,jlev)=zfu1(:)*zftop1(:)+zfu2(:)*zftop2(:)
+    //         dfd(:,jlev)=zfd1(:)*zftop1(:)+zfd2(:)*zftop2(:)
+    //         dswfl(:,jlev)=dfu(:,jlev)+dfd(:,jlev)
+    //        endwhere
+    //       enddo
 }
 
 /// Compute long wave radiation
@@ -887,24 +942,27 @@ fn lwr() {
     // 1) set some necessary (helpful) bits
     //
 
-    let zero = 1.E - 6; // small number
+    let zero = 0.000001; // small number
 
-    let zao30 = 0.209 * (7.E - 5).pow(0.436); // to get a(o3)=0 for o3=0
-    let zco20 = 0.0676 * (0.01022).pow(0.421); // to get a(co2)=0 for co2=0
-    let zh2o0a = 0.846 * (3.59E-5).pow(0.243); // to get a(h2o)=0 for h2o=0
-    let zh2o0 = 0.832 * (0.0286.pow(0.26)); // to get t(h2o)=1 for h2o=0
+    let zao30 = 0.209 * (0.00007 as Float).powf(0.436); // to get a(o3)=0 for o3=0
+    let zco20 = 0.0676 * (0.01022 as Float).powf(0.421); // to get a(co2)=0 for co2=0
+    let zh2o0a = 0.846 * (0.0000359 as Float).powf(0.243); // to get a(h2o)=0 for h2o=0
+    let zh2o0 = 0.832 * ((0.0286 as Float).powf(0.26)); // to get t(h2o)=1 for h2o=0
 
     // to make a(o3) continues at 0.01cm:
-    let zao3c = 0.209 * (0.01 + 7.E - 5).pow(0.436) - zao30 - 0.0212 * log10(0.01);
+    let zao3c =
+        0.209 * ((0.01 + 0.00007) as Float).powf(0.436) - zao30 - 0.0212 * (0.01 as Float).log10();
 
     // to make a(co2) continues at 1cm:
-    let zaco2c = 0.0676 * 1.01022.pow(0.421) - zco20;
+    let zaco2c = 0.0676 * (1.01022 as Float).powf(0.421) - zco20;
 
     // to make a(h2o) continues at 0.01gm:
-    let zah2oc = 0.846 * ((0.01 + 3.59E-5).pow(0.243)) - zh2o0a - 0.24 * ALOG10(0.02);
+    let zah2oc =
+        0.846 * (((0.01 + 3.59E-5) as Float).powf(0.243)) - zh2o0a - 0.24 * (0.02 as Float).log10();
 
     // to make t(h2o) continues at 2gm :
-    let zth2oc = 1. - (0.832 * ((2. + 0.0286).pow(0.26)) - zh2o0) + 0.1196 * log(2. - 0.6931);
+    let zth2oc = 1. - (0.832 * (((2. + 0.0286) as Float).powf(0.26)) - zh2o0)
+        + 0.1196 * ((2. - 0.6931) as Float).ln();
 
     zsigh2[1] = 0.;
 
@@ -912,11 +970,11 @@ fn lwr() {
     //zsigh2(2: NLEP) = sigmah(1: NLEV) * *2;
     // zps2(:)=dp(:)*dp(:)
 
-
     // 2) calc. stb*t**4 + preset fluxes
 
-    dftu(:,:)=0.;
-    dftd(:,:)=0.;
+    // TODO
+    // dftu(:,:)=0.;
+    // dftd(:,:)=0.;
 
     // stb*t**4 on full and half levels
 
@@ -931,13 +989,12 @@ fn lwr() {
     // zst4h(:,1)=zst4(:,1)-(zst4(:,1)-zst4(:,2))*sigma(1)/(sigma(1)-sigma(2));
 
     for jlev in 2..NLEV {
-        let jlem=jlev-1;
+        let jlem = jlev - 1;
         // TODO
         // zst4h(:,jlev)=(zst4(:,jlev)*(sigma(jlem)-sigmah(jlem))
         //                    +zst4(:,jlem)*(sigmah(jlem)-sigma(jlev)))
         //                   /(sigma(jlem)-sigma(jlev));
     }
-
 
     // TODO
     // where((zst4(:,NLEV)-zst4h(:,NLEV))                                &
@@ -958,7 +1015,6 @@ fn lwr() {
     // zbue2(:,NLEP)=zbu(:,NLEP)
 
     // TODO more
-
 }
 
 /// Calculate earth's orbital parameters using Dave Threshers
@@ -1335,7 +1391,7 @@ fn orb_params(
 
         obsum = 0.0;
 
-        for i in 1..POBLEN {
+        for i in 0..POBLEN {
             obsum = obsum
                 + obamp[i] * psecdeg * ((obrate[i] * psecdeg * years + obphas[i]) * degrad).cos();
         }
@@ -1349,13 +1405,13 @@ fn orb_params(
 
         cossum = 0.0;
 
-        for i in 1..PECCLEN {
+        for i in 0..PECCLEN {
             cossum = cossum + ecamp[i] * ((ecrate[i] * psecdeg * years + ecphas[i]) * degrad).cos();
         }
 
         sinsum = 0.0;
 
-        for i in 1..PECCLEN {
+        for i in 0..PECCLEN {
             sinsum = sinsum + ecamp[i] * ((ecrate[i] * psecdeg * years + ecphas[i]) * degrad).sin();
         }
 
@@ -1396,7 +1452,7 @@ fn orb_params(
 
         mvsum = 0.0;
 
-        for i in 1..PMVELEN {
+        for i in 0..PMVELEN {
             mvsum = mvsum
                 + mvamp[i] * psecdeg * ((mvrate[i] * psecdeg * years + mvphas[i]) * degrad).sin();
         }
@@ -1404,7 +1460,7 @@ fn orb_params(
 
         // Cases to make sure mvelp is between 0 and 360.
 
-        while mvelp > 0.0 {
+        while mvelp < 0.0 {
             mvelp = mvelp + 360.0;
         }
         while mvelp >= 360.0 {
@@ -1472,6 +1528,8 @@ fn orb_decl(
     mvelpp: Float,
     lambm0: Float,
     obliqr: Float,
+    n_days_per_year: Int,
+    ndatim: Vec<Int>,
     mut delta: &mut Float,
     mut eccf: &mut Float,
 ) {
@@ -1507,7 +1565,7 @@ fn orb_decl(
     // days past or before (a negative increment) the vernal equinox divided by
     // the days in a model year times the 2*pi radians in a complete orbit.
 
-    lambm = lambm0 + (calday - ve) * 2. * pie / (n_days_per_year + ndatim(7)); // ndatim(7) = leap year
+    lambm = lambm0 + (calday - ve) * 2. * pie / (n_days_per_year + ndatim[6]) as Float; // ndatim(7) = leap year
     lmm = lambm - mvelpp;
 
     // The earth's true longitude, in radians, is then found from

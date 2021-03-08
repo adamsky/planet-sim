@@ -11,79 +11,79 @@ pub struct Config {
 pub struct PlanetConfig {
     // astronomy
     /// 1 = fix the planetary orbit
-    nfixorb: Int,
+    pub nfixorb: Int,
     /// Eccentricity for fixed orbits (AMIP-II value)
-    eccen: Float,
+    pub eccen: Float,
     /// Longitude of perihelion
-    mvelp: Float,
+    pub mvelp: Float,
     /// Obliquity (deg) (AMIP-II)
-    obliq: Float,
+    pub obliq: Float,
     /// Rotation speed (factor)
-    rotspd: Float,
+    pub rotspd: Float,
     /// Sidereal day length
-    sidereal_day: Float,
+    pub sidereal_day: Float,
     /// Solar day length
-    solar_day: Float,
+    pub solar_day: Float,
     /// Sidereal year length
-    sidereal_year: Float,
+    pub sidereal_year: Float,
     /// Tropical year length
-    tropical_year: Float,
+    pub tropical_year: Float,
 
     // atmosphere
     /// Kappa (Poisson constant R/Cp)
-    akap: Float,
+    pub akap: Float,
     /// Lapse rate
-    alr: Float,
+    pub alr: Float,
     /// Gas constant
-    gascon: Float,
+    pub gascon: Float,
     // Parameters for Magnus-Teten-Formula
     // for saturation vapor pressure over liquid water
     /// Parameter for Magnus-Teten-Formula
-    ra1: Float,
+    pub ra1: Float,
     /// Parameter for Magnus-Teten-Formula
-    ra2: Float,
+    pub ra2: Float,
     /// Parameter for Magnus-Teten-Formula
-    ra4: Float,
+    pub ra4: Float,
 
     // numerics
     /// Time filter constant
-    pnu: Float,
+    pub pnu: Float,
 
     // physics
     /// Gravity (mean on NN)
-    ga: Float,
+    pub ga: Float,
     /// Radius
-    plarad: Float,
+    pub plarad: Float,
 
     // radiation
     /// Solar constant
-    gsol0: Float,
+    pub gsol0: Float,
 
     // radmod
     /// Mass (10^24 kg)
-    p_mass: Float,
+    pub p_mass: Float,
     /// Volume (10^10 km3)
-    p_volume: Float,
+    pub p_volume: Float,
     /// Equatorial radius
-    p_radius_eq: Float,
+    pub p_radius_eq: Float,
     /// Polar radius
-    p_radius_po: Float,
+    pub p_radius_po: Float,
     /// Mean radius
-    p_radius_me: Float,
+    pub p_radius_me: Float,
     /// Ellipticity
-    p_ellipticity: Float,
+    pub p_ellipticity: Float,
     /// Density (kg/m3)
-    p_density: Float,
+    pub p_density: Float,
     /// Bond albedo
-    p_albedo: Float,
+    pub p_albedo: Float,
     /// Black body temperature
-    p_blackt: Float,
+    pub p_blackt: Float,
     /// Sidereal rotation period
-    p_sidrot: Float,
+    pub p_sidrot: Float,
     /// Perihelion (10^6 km)
-    p_perihelion: Float,
+    pub p_perihelion: Float,
     /// Aphelion (10^6 km)
-    p_aphelion: Float,
+    pub p_aphelion: Float,
     // Sidereal orbit period
     // p_sidorbit: Float, // = sidereal_year / sidereal_day
 }

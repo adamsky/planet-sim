@@ -5,10 +5,10 @@ use crate::{Float, Int};
 /// Number of tracers, 1st. reserved for q
 pub const NTRACE: usize = 1;
 /// Number of processes
-pub const NPRO: usize = 4;
+pub const NPRO: usize = 1;
 
 /// Number of latitudes
-pub const NLAT: usize = 64;
+pub const NLAT: usize = 32;
 /// Number of levels
 pub const NLEV: usize = 10;
 

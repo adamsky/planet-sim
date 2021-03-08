@@ -2,9 +2,9 @@ pub mod radiation;
 
 use crate::config::PlanetConfig;
 use crate::constants::{NESP, NHOR, NLAT, NLEP, NLEV, NLON, NLPP, NPRO, NSPP, NTRACE, NTRU};
-use crate::{Float, Int};
+use crate::{Float, Int, Vec2d, Vec3d, Vec4d};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Sim {
     // resolution: Resolution,
     datetime: DateTime,
@@ -31,7 +31,22 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(planet_cfg: PlanetConfig) -> Self {
-        let sim: Sim = Default::default();
+        let mut sim: Sim = Default::default();
+        sim.planet_vars.eccen = planet_cfg.eccen;
+        sim.planet_vars.obliq = planet_cfg.obliq;
+        sim.planet_vars.mvelp = planet_cfg.mvelp;
+        sim.planet_vars.nfixorb = planet_cfg.nfixorb;
+        println!("init start");
+        sim.rad.initialize(
+            sim.int_scalars.ndheat,
+            sim.int_scalars.neqsig,
+            sim.planet_vars.nfixorb,
+            sim.datetime.n_start_year,
+            sim.planet_vars.eccen,
+            sim.planet_vars.obliq,
+            sim.planet_vars.mvelp,
+        );
+        println!("init done");
         sim
     }
 
@@ -72,6 +87,7 @@ pub enum Planet {
 //     }
 // }
 
+#[derive(Copy, Clone)]
 struct IntScalars {
     /// Add noise for kick > 0
     pub kick: Int,
@@ -167,6 +183,7 @@ struct IntScalars {
 
 impl Default for IntScalars {
     fn default() -> Self {
+        println!("IntScalars::default()");
         Self {
             kick: 1,
             mars: 0,
@@ -219,74 +236,75 @@ impl Default for IntScalars {
     }
 }
 
+#[derive(Clone)]
 struct SpectralArrays {
     /// Spectral Divergence
-    pub sd: [[Float; NESP]; NLEV],
+    pub sd: Vec2d<Float>, // (NESP, NLEV)
     /// Spectral Temperature
-    pub st: [[Float; NESP]; NLEV],
+    pub st: Vec2d<Float>, // (NESP, NLEV)
     /// Spectral Vorticity
-    pub sz: [[Float; NESP]; NLEV],
+    pub sz: Vec2d<Float>, // (NESP, NLEV)
     /// Spectral Specific Humidity
-    pub sq: [[Float; NESP]; NLEV],
+    pub sq: Vec2d<Float>, // (NESP, NLEV)
     /// Spectral Pressure (ln Ps)
-    pub sp: [Float; NESP],
+    pub sp: Vec<Float>, // (NESP)
     /// Spectral Orography
-    pub so: [Float; NESP],
+    pub so: Vec<Float>, // (NESP)
     /// Spectral Restoration Temperature
-    pub sr: [[Float; NESP]; NLEV],
+    pub sr: Vec2d<Float>, // (NESP, NLEV)
 
     /// Spectral Divergence  Partial
-    pub sdp: [[Float; NSPP]; NLEV],
+    pub sdp: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Temperature Partial
-    pub stp: [[Float; NSPP]; NLEV],
+    pub stp: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Vorticity   Partial
-    pub szp: [[Float; NSPP]; NLEV],
+    pub szp: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral S.Humidity  Partial
-    pub sqp: [[Float; NSPP]; NLEV],
+    pub sqp: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Pressure    Partial
-    pub spp: [Float; NSPP],
+    pub spp: Vec<Float>, // (NSPP)
     /// Spectral Orography   Partial
-    pub sop: [Float; NSPP],
+    pub sop: Vec<Float>, // (NSPP)
     /// Spectral Restoration Partial
-    pub srp: [[Float; NSPP]; NLEV],
+    pub srp: Vec2d<Float>, // (NSPP, NLEV)
 
     /// Spectral Divergence  Tendency
-    pub sdt: [[Float; NSPP]; NLEV],
+    pub sdt: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Temperature Tendency
-    pub stt: [[Float; NSPP]; NLEV],
+    pub stt: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Vorticity   Tendency
-    pub szt: [[Float; NSPP]; NLEV],
+    pub szt: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral S.Humidity  Tendency
-    pub sqt: [[Float; NSPP]; NLEV],
+    pub sqt: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Pressure    Tendency
-    pub spt: [Float; NSPP],
+    pub spt: Vec<Float>, // (NSPP)
 
     /// Spectral Divergence  Minus
-    pub sdm: [[Float; NSPP]; NLEV],
+    pub sdm: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Temperature Minus
-    pub stm: [[Float; NSPP]; NLEV],
+    pub stm: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Vorticity   Minus
-    pub szm: [[Float; NSPP]; NLEV],
+    pub szm: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral S.Humidity  Minus
-    pub sqm: [[Float; NSPP]; NLEV],
+    pub sqm: Vec2d<Float>, // (NSPP, NLEV)
     /// Spectral Pressure    Minus
-    pub spm: [Float; NSPP],
+    pub spm: Vec<Float>, // (NSPP)
 
     /// horizontal diffusion
-    pub sak: [[Float; NESP]; NLEV],
+    pub sak: Vec2d<Float>, // (NESP, NLEV)
     /// horizontal diffusion partial
-    pub sakpp: [[Float; NSPP]; NLEV],
+    pub sakpp: Vec2d<Float>, // (NSPP, NLEV)
     /// specific humidity for output
-    pub sqout: [[Float; NESP]; NLEV],
+    pub sqout: Vec2d<Float>, // (NESP, NLEV)
     /// Factors for output normalization
-    pub spnorm: [Float; NESP],
+    pub spnorm: Vec<Float>, // (NESP)
 
     /// Holds wavenumber
-    pub nindex: [Int; NESP],
+    pub nindex: Vec<Int>, // (NESP)
     /// Holds wavenumber
-    pub nscatsp: [Int; NPRO],
+    pub nscatsp: Vec<Int>, // (NPRO)
     /// Holds wavenumber
-    pub ndel: [Int; NLEV],
+    pub ndel: Vec<Int>, // (NLEV)
 
     /// Difference between instances
     pub sdd: Vec<Vec<Float>>,
@@ -301,284 +319,352 @@ struct SpectralArrays {
 impl Default for SpectralArrays {
     fn default() -> Self {
         Self {
-            nindex: [NTRU as Int; NESP],
-            nscatsp: [NSPP as Int; NPRO],
-            ndel: [2; NLEV],
-            ..Default::default()
+            sd: vec![],
+            st: vec![],
+            sz: vec![],
+            sq: vec![],
+            sp: vec![],
+            so: vec![],
+            sr: vec![],
+            sdp: vec![],
+            stp: vec![],
+            szp: vec![],
+            sqp: vec![],
+            spp: vec![],
+            sop: vec![],
+            srp: vec![],
+            sdt: vec![],
+            stt: vec![],
+            szt: vec![],
+            sqt: vec![],
+            spt: vec![],
+            sdm: vec![],
+            stm: vec![],
+            szm: vec![],
+            sqm: vec![],
+            spm: vec![],
+            sak: vec![],
+            sakpp: vec![],
+            sqout: vec![],
+            spnorm: vec![],
+            nindex: vec![NTRU as Int; NESP],
+            nscatsp: vec![NSPP as Int; NPRO],
+            ndel: vec![2; NLEV],
+            sdd: vec![],
+            std: vec![],
+            szd: vec![],
+            spd: vec![],
         }
     }
 }
 
 /// Global Gridpoint Arrays (un-dimensionalized)
+#[derive(Default, Clone)]
 struct GridArraysUndim {
     /// Divergence
-    pub gd: [[Float; NHOR]; NLEV],
+    pub gd: Vec2d<Float>, // (NHOR, NLEV)
     /// Temperature (-t0)
-    pub gt: [[Float; NHOR]; NLEV],
+    pub gt: Vec2d<Float>, // (NHOR, NLEV)
     /// Absolute vorticity
-    pub gz: [[Float; NHOR]; NLEV],
+    pub gz: Vec2d<Float>, // (NHOR, NLEV)
     /// Spec. humidity
-    pub gq: [[Float; NHOR]; NLEV],
+    pub gq: Vec2d<Float>, // (NHOR, NLEV)
     /// Zonal wind (*cos(phi))
-    pub gu: [[Float; NHOR]; NLEV],
+    pub gu: Vec2d<Float>, // (NHOR, NLEV)
     /// Meridional wind (*cos(phi))
-    pub gv: [[Float; NHOR]; NLEV],
+    pub gv: Vec2d<Float>, // (NHOR, NLEV)
     /// t-tendency
-    pub gtdt: [[Float; NHOR]; NLEV],
+    pub gtdt: Vec2d<Float>, // (NHOR, NLEV)
     /// q-tendency
-    pub gqdt: [[Float; NHOR]; NLEV],
+    pub gqdt: Vec2d<Float>, // (NHOR, NLEV)
     /// u-tendency
-    pub gudt: [[Float; NHOR]; NLEV],
+    pub gudt: Vec2d<Float>, // (NHOR, NLEV)
     /// v-tendency
-    pub gvdt: [[Float; NHOR]; NLEV],
+    pub gvdt: Vec2d<Float>, // (NHOR, NLEV)
     /// Surface pressure or ln(ps)
-    pub gp: [Float; NHOR],
+    pub gp: Vec<Float>, // (NHOR)
     /// dln(ps)/dphi
-    pub gpj: [Float; NHOR],
+    pub gpj: Vec<Float>, // (NHOR)
 
     /// 1/cos(phi)**2
-    pub rcsq: [Float; NHOR],
+    pub rcsq: Vec<Float>, // (NHOR)
 }
 
-impl Default for GridArraysUndim {
-    fn default() -> Self {
-        Self {
-            gd: [[0.; NHOR]; NLEV],
-            gt: [[0.; NHOR]; NLEV],
-            gz: [[0.; NHOR]; NLEV],
-            gq: [[0.; NHOR]; NLEV],
-            gu: [[0.; NHOR]; NLEV],
-            gv: [[0.; NHOR]; NLEV],
-            gtdt: [[0.; NHOR]; NLEV],
-            gqdt: [[0.; NHOR]; NLEV],
-            gudt: [[0.; NHOR]; NLEV],
-            gvdt: [[0.; NHOR]; NLEV],
-            gp: [0.; NHOR],
-            gpj: [0.; NHOR],
-            rcsq: [0.; NHOR],
-        }
-    }
-}
+// impl Default for GridArraysUndim {
+//     fn default() -> Self {
+//         Self {
+//             gd: vec![vec![0.; NLEV]; NHOR],
+//             gt: vec![vec![0.; NLEV]; NHOR],
+//             gz: vec![vec![0.; NLEV]; NHOR],
+//             gq: vec![vec![0.; NLEV]; NHOR],
+//             gu: vec![vec![0.; NLEV]; NHOR],
+//             gv: vec![vec![0.; NLEV]; NHOR],
+//             gtdt: vec![vec![0.; NLEV]; NHOR],
+//             gqdt: vec![vec![0.; NLEV]; NHOR],
+//             gudt: vec![vec![0.; NLEV]; NHOR],
+//             gvdt: vec![vec![0.; NLEV]; NHOR],
+//             gp: vec![0.; NHOR],
+//             gpj: vec![0.; NHOR],
+//             rcsq: vec![0.; NHOR],
+//         }
+//     }
+// }
 
 /// Global Gridpoint Arrays (dimensionalized)
+#[derive(Clone)]
 struct GridArraysDim {
     /// Temperature
-    pub dt: [[Float; NHOR]; NLEP],
+    pub dt: Vec2d<Float>, // (NHOR, NLEP)
     /// Spec. humidity
-    pub dq: [[Float; NHOR]; NLEP],
+    pub dq: Vec2d<Float>, // (NHOR, NLEP)
     /// Zonal wind [m/s]
-    pub du: [[Float; NHOR]; NLEP],
+    pub du: Vec2d<Float>, // (NHOR, NLEP)
     /// Meridional wind [m/s]
-    pub dv: [[Float; NHOR]; NLEP],
+    pub dv: Vec2d<Float>, // (NHOR, NLEP)
     /// Surface pressure
-    pub dp: [Float; NHOR],
+    pub dp: Vec<Float>, // (NHOR)
 
     /// Saturation humidity
-    pub dqsat: [[Float; NHOR]; NLEP],
+    pub dqsat: Vec2d<Float>, // (NHOR, NLEP)
     /// Adiabatic q-tendencies (for eg kuo)
-    pub dqt: [[Float; NHOR]; NLEP],
+    pub dqt: Vec2d<Float>, // (NHOR, NLEP)
     /// Cloud cover
-    pub dcc: [[Float; NHOR]; NLEP],
+    pub dcc: Vec2d<Float>, // (NHOR, NLEP)
     /// Liquid water content
-    pub dql: [[Float; NHOR]; NLEP],
+    pub dql: Vec2d<Float>, // (NHOR, NLEP)
     /// Vertical velocity (dp/dt)
-    pub dw: [[Float; NHOR]; NLEV],
+    pub dw: Vec2d<Float>, // (NHOR, NLEV)
     /// t-tendency
-    pub dtdt: [[Float; NHOR]; NLEP],
+    pub dtdt: Vec2d<Float>, // (NHOR, NLEP)
     /// q-tendency
-    pub dqdt: [[Float; NHOR]; NLEP],
+    pub dqdt: Vec2d<Float>, // (NHOR, NLEP)
     /// u-tendency
-    pub dudt: [[Float; NHOR]; NLEP],
+    pub dudt: Vec2d<Float>, // (NHOR, NLEP)
     /// v-tendency
-    pub dvdt: [[Float; NHOR]; NLEP],
+    pub dvdt: Vec2d<Float>, // (NHOR, NLEP)
 
     /// Surface pressure at time t
-    pub dp0: [Float; NHOR],
+    pub dp0: Vec<Float>, // (NHOR)
     /// Zonal wind at time t
-    pub du0: [[Float; NHOR]; NLEP],
+    pub du0: Vec2d<Float>, // (NHOR, NLEP)
     /// Meridional wind at time t
-    pub dv0: [[Float; NHOR]; NLEP],
+    pub dv0: Vec2d<Float>, // (NHOR, NLEP)
     /// Trace array
-    pub dtrace: [[[[Float; NLON]; NLAT]; NLEV]; NTRACE],
+    pub dtrace: Vec4d<Float>, // (NLON, NLAT, NLEV, NTRACE)
 }
 
 impl Default for GridArraysDim {
     fn default() -> Self {
         Self {
-            dtrace: [[[[1.; NLON]; NLAT]; NLEV]; NTRACE],
-            ..Default::default()
+            dt: vec![],
+            dq: vec![],
+            du: vec![],
+            dv: vec![],
+            dp: vec![],
+            dqsat: vec![],
+            dqt: vec![],
+            dcc: vec![],
+            dql: vec![],
+            dw: vec![],
+            dtdt: vec![],
+            dqdt: vec![],
+            dudt: vec![],
+            dvdt: vec![],
+            dp0: vec![],
+            du0: vec![],
+            dv0: vec![],
+            dtrace: vec![vec![vec![vec![1.; NTRACE]; NLEV]; NLAT]; NLON],
         }
     }
 }
 
+#[derive(Clone)]
 struct BasicRadiation {
     /// Albedo
-    pub dalb: [Float; NHOR],
+    pub dalb: Vec<Float>, // (NHOR)
     /// Net solar radiation
-    pub dswfl: [[Float; NHOR]; NLEP],
+    pub dswfl: Vec2d<Float>, // (NHOR, NLEP)
     /// Net thermal radiation
-    pub dlwfl: [[Float; NHOR]; NLEP],
+    pub dlwfl: Vec2d<Float>, // (NHOR, NLEP)
     /// Net radiation (SW + LW)
-    pub dflux: [[Float; NHOR]; NLEP],
+    pub dflux: Vec2d<Float>, // (NHOR, NLEP)
     /// Solar radiation upward
-    pub dfu: [[Float; NHOR]; NLEP],
+    pub dfu: Vec2d<Float>, // (NHOR, NLEP)
     /// Solar radiation downward
-    pub dfd: [[Float; NHOR]; NLEP],
+    pub dfd: Vec2d<Float>, // (NHOR, NLEP)
     /// Thermal radiation upward
-    pub dftu: [[Float; NHOR]; NLEP],
+    pub dftu: Vec2d<Float>, // (NHOR, NLEP)
     /// Thermal radiation downward
-    pub dftd: [[Float; NHOR]; NLEP],
+    pub dftd: Vec2d<Float>, // (NHOR, NLEP)
 }
 
 impl Default for BasicRadiation {
     fn default() -> Self {
         Self {
-            dalb: [0.; NHOR],
-            dswfl: [[0.; NHOR]; NLEP],
-            dlwfl: [[0.; NHOR]; NLEP],
-            dflux: [[0.; NHOR]; NLEP],
-            dfu: [[0.; NHOR]; NLEP],
-            dfd: [[0.; NHOR]; NLEP],
-            dftu: [[0.; NHOR]; NLEP],
-            dftd: [[0.; NHOR]; NLEP],
+            dalb: vec![0.; NHOR],
+            dswfl: vec![vec![0.; NLEP]; NHOR],
+            dlwfl: vec![vec![0.; NLEP]; NHOR],
+            dflux: vec![vec![0.; NLEP]; NHOR],
+            dfu: vec![vec![0.; NLEP]; NHOR],
+            dfd: vec![vec![0.; NLEP]; NHOR],
+            dftu: vec![vec![0.; NLEP]; NHOR],
+            dftd: vec![vec![0.; NLEP]; NHOR],
         }
     }
 }
 
+#[derive(Clone)]
 struct Surface {
     /// Surface wetness
-    pub drhs: [Float; NHOR],
+    pub drhs: Vec<Float>, // (NHOR)
     /// Land(1)/sea(0) mask
-    pub dls: [Float; NHOR],
+    pub dls: Vec<Float>, // (NHOR)
     /// Rougthness length
-    pub dz0: [Float; NHOR],
+    pub dz0: Vec<Float>, // (NHOR)
     /// Ice thickness
-    pub diced: [Float; NHOR],
+    pub diced: Vec<Float>, // (NHOR)
     /// Ice cover
-    pub dicec: [Float; NHOR],
+    pub dicec: Vec<Float>, // (NHOR)
     /// x-surface wind stress
-    pub dtaux: [Float; NHOR],
+    pub dtaux: Vec<Float>, // (NHOR)
     /// y-surface wind stress
-    pub dtauy: [Float; NHOR],
+    pub dtauy: Vec<Float>, // (NHOR)
     /// u-star**3 (needed eg. for coupling)
-    pub dust3: [Float; NHOR],
+    pub dust3: Vec<Float>, // (NHOR)
     /// Surface sensible heat flx
-    pub dshfl: [Float; NHOR],
+    pub dshfl: Vec<Float>, // (NHOR)
     /// Surface latent heat flx
-    pub dlhfl: [Float; NHOR],
+    pub dlhfl: Vec<Float>, // (NHOR)
     /// Surface evaporation
-    pub devap: [Float; NHOR],
+    pub devap: Vec<Float>, // (NHOR)
     /// Surface air temperature
-    pub dtsa: [Float; NHOR],
+    pub dtsa: Vec<Float>, // (NHOR)
     /// Mixed-layer depth (output from ocean)
-    pub dmld: [Float; NHOR],
+    pub dmld: Vec<Float>, // (NHOR)
 
     // TODO what is this?
-    pub dshdt: [Float; NHOR],
+    pub dshdt: Vec<Float>, // (NHOR)
     // TODO what is this?
-    pub dlhdt: [Float; NHOR],
+    pub dlhdt: Vec<Float>, // (NHOR)
 }
 
 impl Default for Surface {
     fn default() -> Self {
         Self {
-            dls: [1.; NHOR],
-            ..Default::default()
+            drhs: vec![],
+            dls: vec![1.; NHOR],
+            dz0: vec![],
+            diced: vec![],
+            dicec: vec![],
+            dtaux: vec![],
+            dtauy: vec![],
+            dust3: vec![],
+            dshfl: vec![],
+            dlhfl: vec![],
+            devap: vec![],
+            dtsa: vec![],
+            dmld: vec![],
+            dshdt: vec![],
+            dlhdt: vec![],
         }
     }
 }
 
+#[derive(Clone)]
 struct Water {
     /// Convective Precip (m/s)
-    pub dprc: [Float; NHOR],
+    pub dprc: Vec<Float>, // (NHOR)
     /// Large Scale Precip (m/s)
-    pub dprl: [Float; NHOR],
+    pub dprl: Vec<Float>, // (NHOR)
     /// Snow Fall (m/s)
-    pub dprs: [Float; NHOR],
+    pub dprs: Vec<Float>, // (NHOR)
     /// Vertical integrated specific humidity (kg/m**2)
-    pub dqvi: [Float; NHOR],
+    pub dqvi: Vec<Float>, // (NHOR)
 }
 
 impl Default for Water {
     fn default() -> Self {
         Self {
-            dprc: [0.; NHOR],
-            dprl: [0.; NHOR],
-            dprs: [0.; NHOR],
-            dqvi: [0.; NHOR],
+            dprc: vec![0.; NHOR],
+            dprl: vec![0.; NHOR],
+            dprs: vec![0.; NHOR],
+            dqvi: vec![0.; NHOR],
         }
     }
 }
 
+#[derive(Clone)]
 struct Biome {
     /// Forest cover (fract.)
-    pub dforest: [Float; NHOR],
+    pub dforest: Vec<Float>, // (NHOR)
     /// Field capacity (m)
-    pub dwmax: [Float; NHOR],
+    pub dwmax: Vec<Float>, // (NHOR)
 }
 
 impl Default for Biome {
     fn default() -> Self {
         Self {
-            dforest: [0.5; NHOR],
-            ..Default::default()
+            dforest: vec![0.5; NHOR],
+            dwmax: vec![],
         }
     }
 }
 
+#[derive(Clone)]
 struct Soil {
     /// Soil wetness (m)
-    pub dwatc: [Float; NHOR],
+    pub dwatc: Vec<Float>, // (NHOR)
     /// Surface runoff (m/s)
-    pub drunoff: [Float; NHOR],
+    pub drunoff: Vec<Float>, // (NHOR)
     /// Snow depth (m)
-    pub dsnow: [Float; NHOR],
+    pub dsnow: Vec<Float>, // (NHOR)
     /// Snow melt (m/s water eq.)
-    pub dsmelt: [Float; NHOR],
+    pub dsmelt: Vec<Float>, // (NHOR)
     /// Snow depth change (m/s water eq.)
-    pub dsndch: [Float; NHOR],
+    pub dsndch: Vec<Float>, // (NHOR)
     /// Soil temperature uppermost level (K)
-    pub dtsoil: [Float; NHOR],
+    pub dtsoil: Vec<Float>, // (NHOR)
     /// Soil temperature level 2 (K)
-    pub dtd2: [Float; NHOR],
+    pub dtd2: Vec<Float>, // (NHOR)
     /// Soil temperature level 3 (K)
-    pub dtd3: [Float; NHOR],
+    pub dtd3: Vec<Float>, // (NHOR)
     /// Soil temperature level 4 (K)
-    pub dtd4: [Float; NHOR],
+    pub dtd4: Vec<Float>, // (NHOR)
     /// Soil temperature lowermost level (K)
-    pub dtd5: [Float; NHOR],
+    pub dtd5: Vec<Float>, // (NHOR)
     /// Glacier mask (0.,1.)
-    pub dglac: [Float; NHOR],
+    pub dglac: Vec<Float>, // (NHOR)
 }
 
 impl Default for Soil {
     fn default() -> Self {
         Self {
-            dwatc: [0.; NHOR],
-            drunoff: [0.; NHOR],
-            dsnow: [0.; NHOR],
-            dsmelt: [0.; NHOR],
-            dsndch: [0.; NHOR],
-            dtsoil: [0.; NHOR],
-            dtd2: [0.; NHOR],
-            dtd3: [0.; NHOR],
-            dtd4: [0.; NHOR],
-            dtd5: [0.; NHOR],
-            dglac: [0.; NHOR],
+            dwatc: vec![0.; NHOR],
+            drunoff: vec![0.; NHOR],
+            dsnow: vec![0.; NHOR],
+            dsmelt: vec![0.; NHOR],
+            dsndch: vec![0.; NHOR],
+            dtsoil: vec![0.; NHOR],
+            dtd2: vec![0.; NHOR],
+            dtd3: vec![0.; NHOR],
+            dtd4: vec![0.; NHOR],
+            dtd5: vec![0.; NHOR],
+            dglac: vec![0.; NHOR],
         }
     }
 }
 
+#[derive(Clone)]
 struct DiagnosticArrays {
     // TODO what is this?
-    pub ndl: [Int; NLEV],
+    pub ndl: Vec<Int>, // (NLEV)
 
-    pub csu: [[Float; NLAT]; NLEV],
-    pub csv: [[Float; NLAT]; NLEV],
-    pub cst: [[Float; NLAT]; NLEV],
-    pub csm: [[Float; NLAT]; NLEV],
-    pub ccc: [[Float; NLAT]; NLEV],
-    pub span: [Float; NESP],
+    pub csu: Vec2d<Float>, // (NLAT, NLEV)
+    pub csv: Vec2d<Float>, // (NLAT, NLEV)
+    pub cst: Vec2d<Float>, // (NLAT, NLEV)
+    pub csm: Vec2d<Float>, // (NLAT, NLEV)
+    pub ccc: Vec2d<Float>, // (NLAT, NLEV)
+    pub span: Vec<Float>,  // (NESP)
 
     /// 2-d diagnostics
     pub dgp2d: Vec<Vec<Float>>,
@@ -609,65 +695,65 @@ struct DiagnosticArrays {
 
     // accumulated output
     /// Acculumated evaporation
-    pub aevap: [Float; NHOR],
+    pub aevap: Vec<Float>, // (NHOR)
     /// Acculumated lage scale precip
-    pub aprl: [Float; NHOR],
+    pub aprl: Vec<Float>, // (NHOR)
     /// Acculumated convective precip
-    pub aprc: [Float; NHOR],
+    pub aprc: Vec<Float>, // (NHOR)
     /// Acculumated snow fall
-    pub aprs: [Float; NHOR],
+    pub aprs: Vec<Float>, // (NHOR)
     /// Acculumated sensible heat flux
-    pub ashfl: [Float; NHOR],
+    pub ashfl: Vec<Float>, // (NHOR)
     /// Acculumated latent heat flux
-    pub alhfl: [Float; NHOR],
+    pub alhfl: Vec<Float>, // (NHOR)
     /// Acculumated surface runoff
-    pub aroff: [Float; NHOR],
+    pub aroff: Vec<Float>, // (NHOR)
     /// Acculumated snow melt
-    pub asmelt: [Float; NHOR],
+    pub asmelt: Vec<Float>, // (NHOR)
     /// Acculumated snow depth change
-    pub asndch: [Float; NHOR],
+    pub asndch: Vec<Float>, // (NHOR)
     /// Acculumated total cloud cover
-    pub acc: [Float; NHOR],
+    pub acc: Vec<Float>, // (NHOR)
     /// Acculumated surface solar radiation
-    pub assol: [Float; NHOR],
+    pub assol: Vec<Float>, // (NHOR)
     /// Acculumated surface thermal radiation
-    pub asthr: [Float; NHOR],
+    pub asthr: Vec<Float>, // (NHOR)
     /// Acculumated top solar radiation
-    pub atsol: [Float; NHOR],
+    pub atsol: Vec<Float>, // (NHOR)
     /// Acculumated top thermal radiation
-    pub atthr: [Float; NHOR],
+    pub atthr: Vec<Float>, // (NHOR)
     /// Acculumated surface solar radiation upward
-    pub assolu: [Float; NHOR],
+    pub assolu: Vec<Float>, // (NHOR)
     /// Acculumated surface thermal radiation upward
-    pub asthru: [Float; NHOR],
+    pub asthru: Vec<Float>, // (NHOR)
     /// Acculumated top solar radiation upward
-    pub atsolu: [Float; NHOR],
+    pub atsolu: Vec<Float>, // (NHOR)
     /// Acculumated zonal wind stress
-    pub ataux: [Float; NHOR],
+    pub ataux: Vec<Float>, // (NHOR)
     /// Acculumated meridional wind stress
-    pub atauy: [Float; NHOR],
+    pub atauy: Vec<Float>, // (NHOR)
     /// Acculumated vertical integrated q
-    pub aqvi: [Float; NHOR],
+    pub aqvi: Vec<Float>, // (NHOR)
     /// Acculumated surface air temperature
-    pub atsa: [Float; NHOR],
+    pub atsa: Vec<Float>, // (NHOR)
     /// Maximum surface air temperature
-    pub atsama: [Float; NHOR],
+    pub atsama: Vec<Float>, // (NHOR)
     /// Minimum surface air temperature
-    pub atsami: [Float; NHOR],
+    pub atsami: Vec<Float>, // (NHOR)
     /// Acculumated surface temperature
-    pub ats0: [Float; NHOR],
+    pub ats0: Vec<Float>, // (NHOR)
 }
 
 impl Default for DiagnosticArrays {
     fn default() -> Self {
         Self {
-            ndl: [0; NLEV],
-            csu: [[0.; NLAT]; NLEV],
-            csv: [[0.; NLAT]; NLEV],
-            cst: [[0.; NLAT]; NLEV],
-            csm: [[0.; NLAT]; NLEV],
-            ccc: [[0.; NLAT]; NLEV],
-            span: [0.; NESP],
+            ndl: vec![0; NLEV],
+            csu: vec![vec![0.; NLEV]; NLAT],
+            csv: vec![vec![0.; NLEV]; NLAT],
+            cst: vec![vec![0.; NLEV]; NLAT],
+            csm: vec![vec![0.; NLEV]; NLAT],
+            ccc: vec![vec![0.; NLEV]; NLAT],
+            span: vec![0.; NESP],
             dgp2d: vec![],
             dsp2d: vec![],
             dgp3d: vec![],
@@ -681,107 +767,121 @@ impl Default for DiagnosticArrays {
             dentrot: vec![],
             dentroq: vec![],
             dentro: vec![],
-            aevap: [0.; NHOR],
-            aprl: [0.; NHOR],
-            aprc: [0.; NHOR],
-            aprs: [0.; NHOR],
-            ashfl: [0.; NHOR],
-            alhfl: [0.; NHOR],
-            aroff: [0.; NHOR],
-            asmelt: [0.; NHOR],
-            asndch: [0.; NHOR],
-            acc: [0.; NHOR],
-            assol: [0.; NHOR],
-            asthr: [0.; NHOR],
-            atsol: [0.; NHOR],
-            atthr: [0.; NHOR],
-            assolu: [0.; NHOR],
-            asthru: [0.; NHOR],
-            atsolu: [0.; NHOR],
-            ataux: [0.; NHOR],
-            atauy: [0.; NHOR],
-            aqvi: [0.; NHOR],
-            atsa: [0.; NHOR],
-            atsama: [0.; NHOR],
-            atsami: [0.; NHOR],
-            ats0: [0.; NHOR],
+            aevap: vec![0.; NHOR],
+            aprl: vec![0.; NHOR],
+            aprc: vec![0.; NHOR],
+            aprs: vec![0.; NHOR],
+            ashfl: vec![0.; NHOR],
+            alhfl: vec![0.; NHOR],
+            aroff: vec![0.; NHOR],
+            asmelt: vec![0.; NHOR],
+            asndch: vec![0.; NHOR],
+            acc: vec![0.; NHOR],
+            assol: vec![0.; NHOR],
+            asthr: vec![0.; NHOR],
+            atsol: vec![0.; NHOR],
+            atthr: vec![0.; NHOR],
+            assolu: vec![0.; NHOR],
+            asthru: vec![0.; NHOR],
+            atsolu: vec![0.; NHOR],
+            ataux: vec![0.; NHOR],
+            atauy: vec![0.; NHOR],
+            aqvi: vec![0.; NHOR],
+            atsa: vec![0.; NHOR],
+            atsama: vec![0.; NHOR],
+            atsami: vec![0.; NHOR],
+            ats0: vec![0.; NHOR],
         }
     }
 }
 
+#[derive(Clone)]
 struct LatitudeArrays {
-    pub chlat: [[char; 3]; NLAT],
+    pub chlat: Vec<String>, // [[char; 3]; NLAT],
     //TODO "real kind=8"
     /// sin(phi)
-    pub sid: [Float; NLAT],
+    pub sid: Vec<Float>, // (NLAT)
     //TODO "real kind=8"
     /// Gaussian weights
-    pub gwd: [Float; NLAT],
+    pub gwd: Vec<Float>, // (NLAT)
     /// cos(phi)**2
-    pub csq: [Float; NLAT],
+    pub csq: Vec<Float>, // (NLAT)
     /// cos(phi)
-    pub cola: [Float; NLAT],
+    pub cola: Vec<Float>, // (NLAT)
     /// 1 / cos(phi)
-    pub rcs: [Float; NLAT],
+    pub rcs: Vec<Float>, // (NLAT)
     /// latitude in degrees
-    pub deglat: [Float; NLPP],
+    pub deglat: Vec<Float>, // (NLPP)
 }
 
 impl Default for LatitudeArrays {
     fn default() -> Self {
         Self {
-            chlat: [['a'; 3]; NLAT],
-            sid: [0.; NLAT],
-            gwd: [0.; NLAT],
-            csq: [0.; NLAT],
-            cola: [0.; NLAT],
-            rcs: [0.; NLAT],
-            deglat: [0.; NLPP],
+            chlat: vec!["abc".to_string(); NLAT],
+            sid: vec![0.; NLAT],
+            gwd: vec![0.; NLAT],
+            csq: vec![0.; NLAT],
+            cola: vec![0.; NLAT],
+            rcs: vec![0.; NLAT],
+            deglat: vec![0.; NLPP],
         }
     }
 }
 
+#[derive(Clone)]
 struct LevelArrays {
     /// Diffusion time scale for divergence (days)
-    pub tdissd: [Float; NLEV],
+    pub tdissd: Vec<Float>, // (NLEV)
     /// Diffusion time scale for vorticity (days)
-    pub tdissz: [Float; NLEV],
+    pub tdissz: Vec<Float>, // (NLEV)
     /// Diffusion time scale for temperature (days)
-    pub tdisst: [Float; NLEV],
+    pub tdisst: Vec<Float>, // (NLEV)
     /// Diffusion time scale for sp. humidity (days)
-    pub tdissq: [Float; NLEV],
+    pub tdissq: Vec<Float>, // (NLEV)
 
-    pub restim: [Float; NLEV],
-    pub t0: [Float; NLEV],
-    pub tfrc: [Float; NLEV],
-    pub sigh: [Float; NLEV],
-    pub damp: [Float; NLEV],
-    pub dsigma: [Float; NLEV],
-    pub sigma: [Float; NLEV],
-    pub sigmah: [Float; NLEV],
-    pub t01s2: [Float; NLEV],
-    pub tkp: [Float; NLEV],
+    pub restim: Vec<Float>, // (NLEV)
+    pub t0: Vec<Float>,     // (NLEV)
+    pub tfrc: Vec<Float>,   // (NLEV)
+    pub sigh: Vec<Float>,   // (NLEV)
+    pub damp: Vec<Float>,   // (NLEV)
+    pub dsigma: Vec<Float>, // (NLEV)
+    pub sigma: Vec<Float>,  // (NLEV)
+    pub sigmah: Vec<Float>, // (NLEV)
+    pub t01s2: Vec<Float>,  // (NLEV)
+    pub tkp: Vec<Float>,    // (NLEV)
 
-    pub c: [[Float; NLEV]; NLEV],
-    pub g: [[Float; NLEV]; NLEV],
-    pub tau: [[Float; NLEV]; NLEV],
-    pub bm1: [[[Float; NLEV]; NLEV]; NTRU],
+    pub c: Vec2d<Float>,   // (NLEV, NLEV)
+    pub g: Vec2d<Float>,   // (NLEV, NLEV)
+    pub tau: Vec2d<Float>, // (NLEV, NLEV)
+    pub bm1: Vec3d<Float>, // (NLEV, NLEV, NTRU)
 }
 
 impl Default for LevelArrays {
     fn default() -> Self {
         Self {
-            tdissd: [0.20; NLEV],
-            tdissz: [1.10; NLEV],
-            tdisst: [5.60; NLEV],
-            tdissq: [0.1; NLEV],
-            t0: [250.0; NLEV],
-            ..Default::default()
+            tdissd: vec![0.20; NLEV],
+            tdissz: vec![1.10; NLEV],
+            tdisst: vec![5.60; NLEV],
+            tdissq: vec![0.1; NLEV],
+            restim: vec![],
+            t0: vec![250.0; NLEV],
+            tfrc: vec![],
+            sigh: vec![],
+            damp: vec![],
+            dsigma: vec![],
+            sigma: vec![],
+            sigmah: vec![],
+            t01s2: vec![],
+            tkp: vec![],
+            c: vec![],
+            g: vec![],
+            tau: vec![],
+            bm1: vec![],
         }
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct RandomSeed {
     // TODO replacing namelists with monolithic config?
     /// Settable in namelist
@@ -790,6 +890,7 @@ struct RandomSeed {
     pub meed: Vec<Int>,
 }
 
+#[derive(Clone)]
 struct PlanetVars {
     /// Planet name
     pub yplanet: String,
@@ -855,13 +956,38 @@ struct PlanetVars {
 impl Default for PlanetVars {
     fn default() -> Self {
         Self {
+            yplanet: "".to_string(),
+            nfixorb: 0,
+            akap: 0.0,
+            alr: 0.0,
+            ga: 0.0,
+            gascon: 0.0,
+            plarad: 0.0,
+            pnu: 0.0,
+            sidereal_day: 0.0,
+            solar_day: 0.0,
+            sidereal_year: 0.0,
+            tropical_year: 0.0,
+            ww: 0.0,
             oroscale: 1.0,
+            ra1: 0.0,
+            ra2: 0.0,
+            ra4: 0.0,
+            acpd: 0.0,
+            adv: 0.0,
+            cv: 0.0,
+            ct: 0.0,
+            pnu21: 0.0,
+            rdbrv: 0.0,
             rotspd: 1.0,
-            ..Default::default()
+            eccen: 0.0,
+            obliq: 0.0,
+            mvelp: 0.0,
         }
     }
 }
 
+#[derive(Copy, Clone)]
 struct DateTime {
     /// Current timestep
     pub nstep: Int,
@@ -906,13 +1032,26 @@ struct DateTime {
 
 impl Default for DateTime {
     fn default() -> Self {
+        println!("DateTime::default()");
         Self {
+            nstep: 0,
+            nstep1: 0,
+            mstep: 0,
+            mocd: 0,
             n_start_year: 1,
             n_start_month: 1,
+            n_start_step: 0,
             n_days_per_month: 30,
             n_days_per_year: 360,
+            n_run_years: 0,
+            n_run_months: 0,
+            n_run_days: 0,
+            n_run_steps: 0,
+            mpstep: 0,
+            ntspd: 0,
+            nwpd: 0,
             ndatim: [-1; 7],
-            ..Default::default()
+            tmstart: 0.0,
         }
     }
 }
