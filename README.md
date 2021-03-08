@@ -1,6 +1,10 @@
-# plasim-rs
+# planet-sim
 
-[PLASIM](https://www.mi.uni-hamburg.de/en/arbeitsgruppen/theoretische-meteorologie/modelle/plasim.html)
-climate model of intermediate complexity for Earth, Mars and other planets, rewritten in Rust.
+Planet simulator library based on
+[PLASIM](https://www.mi.uni-hamburg.de/en/arbeitsgruppen/theoretische-meteorologie/modelle/plasim.html),
+a fortran climate model of intermediate complexity.
+
+If completed, modern Rust implementation would likely be slower, but could
+perhaps offer a greater degree of flexibility than the original fortran version.
 
 WIP
