@@ -1,6 +1,6 @@
 //! Global constants.
 
-use crate::{Float, Int};
+use crate::{FloatNum, Int};
 
 /// Number of tracers, 1st. reserved for q
 pub const NTRACE: usize = 1;
@@ -8,7 +8,7 @@ pub const NTRACE: usize = 1;
 pub const NPRO: usize = 1;
 
 /// Number of latitudes
-pub const NLAT: usize = 32;
+pub const NLAT: usize = 64;
 /// Number of levels
 pub const NLEV: usize = 10;
 
@@ -48,17 +48,17 @@ pub const NZOM: usize = 2 * NTP1;
 pub const NROOT: usize = 0;
 
 /// ez = 1 / sqrt(3/8)
-pub const EZ: Float = 1.63299310207;
+pub const EZ: FloatNum = 1.63299310207;
 /// Pi
-pub const PI: Float = 3.14159265359;
+pub const PI: FloatNum = 3.14159265359;
 /// 2 Pi
-pub const TWOPI: Float = PI + PI;
+pub const TWOPI: FloatNum = PI + PI;
 /// Gas constant for water vapour
-pub const RV: Float = 461.51;
+pub const RV: FloatNum = 461.51;
 /// Specific heat for water vapour
-pub const ACPV: Float = 1870.;
+pub const ACPV: FloatNum = 1870.;
 /// Melting point (CO2) - for Mars
-pub const TMELT_CO2: Float = 148.0;
+pub const TMELT_CO2: FloatNum = 148.0;
 
 /// Stefan-Bolzman constant
-pub const SBK: Float = 5.67E-8;
+pub const SBK: FloatNum = 5.67E-8;
