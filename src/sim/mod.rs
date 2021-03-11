@@ -1,5 +1,10 @@
-pub mod cal;
+pub mod calendar;
+mod fft;
+mod ocean;
 pub mod radiation;
+mod rain;
+mod surface;
+mod vegetation;
 
 use crate::config::PlanetConfig;
 use crate::constants::{EZ, NESP, NHOR, NLAT, NLEP, NLEV, NLON, NLPP, NPRO, NSPP, NTRACE, NTRU};
@@ -9,6 +14,7 @@ use crate::{FloatNum, Int, Vec2d, Vec3d, Vec4d};
 pub struct Sim {
     // resolution: Resolution,
     datetime: DateTime,
+    cal: calendar::Calendar,
 
     int_scalars: IntScalars,
     real_scalars: RealScalars,

@@ -1,8 +1,9 @@
 //! Radiation module, equivalent of radmod.
 
-use crate::constants::{NHOR, NLEM, NLEP, NLEV, NLON, NLPP, NTRU, SBK, TWOPI};
+use crate::constants::{NHOR, NLEM, NLEP, NLEV, NLON, NLPP, NTRU, PI, SBK, TWOPI};
 use crate::{max, min, FloatNum, Int, Sim, Vec2d};
 
+use crate::sim::calendar;
 use num_traits::Float;
 
 /// Minimum value for eccen
@@ -419,7 +420,7 @@ pub fn step(mut sim: &mut Sim) {
     // 2) compute cosine of solar zenit angle for each gridpoint
     if sim.rad.nsol == 1 {
         // TODO
-        // solang();
+        solang(sim);
     }
 
     // 3) compute ozon distribution
@@ -705,6 +706,130 @@ pub fn step(mut sim: &mut Sim) {
     //        call mksecond(zsec,zsec)
     //        time4rad=time4rad+zsec
     //       endif
+}
+
+/// compute cosine of zenit angle including daily cycle
+///
+/// the following PUMA *subs* are used:
+///
+/// ndayofyear : compute date and time from PUMA timestep
+///
+/// the following PUMA variables are used:
+///
+/// PI         : pi=3.14...
+/// nstep      : PUMA time step
+/// sid(NLPP)  : sines of gaussian latitudes
+/// csq(NLPP)  : cosine**2 of gaussian latitudes
+/// cola(NLPP) : cosine of latitude
+fn solang(mut sim: &mut Sim) {
+    // 1) compute day of the year and hour of the day
+
+    //       interface
+    //          integer function ndayofyear(kstep)
+    //             integer, intent(in) :: kstep
+    //          end function ndayofyear
+    //       end interface
+
+    let zcday = if sim.int_scalars.nperpetual > 0 {
+        sim.int_scalars.nperpetual
+    } else {
+        calendar::ndayofyear(sim.datetime.nstep, &mut sim.cal)
+    };
+
+    let mut imin: Int = 1;
+    let mut ihou: Int = 1;
+    let mut iday: Int = 1;
+    let mut imon: Int = 1;
+    let mut iyea: Int = 1;
+    calendar::ntomin(
+        sim.datetime.nstep,
+        &mut imin,
+        &mut ihou,
+        &mut iday,
+        &mut imon,
+        &mut iyea,
+        &mut sim.cal,
+    );
+
+    // 2) compute declination [radians]
+    let mut zdecl = 0.;
+    orb_decl(
+        zcday as FloatNum,
+        sim.planet_vars.eccen,
+        sim.rad.mvelpp,
+        sim.rad.lambm0,
+        sim.rad.obliqr,
+        sim.datetime.n_days_per_year,
+        sim.datetime.ndatim,
+        &mut zdecl,
+        &mut sim.rad.eccf,
+    );
+
+    // 3) compute zenith angle
+
+    sim.rad.gmu0 = vec![0.0; NHOR];
+    sim.rad.zmuz = 0.0;
+    let zdawn = (sim.real_scalars.dawn * PI / 180.0).sin(); // compute dawn/dusk angle
+    let zrlon = TWOPI / NLON as FloatNum; // scale lambda to radians
+    let zrtim = TWOPI / 1440.0; // scale time to radians
+                                // TODO
+    let zmins = ihou * 60 + imin;
+    let mut jhor = 0;
+    if sim.rad.ncstsol == 0 {
+        for jlat in 0..NLPP {
+            for jlon in 0..NLON {
+                jhor = jhor + 1;
+                let zhangle = zmins as FloatNum * zrtim + jlon as FloatNum * zrlon - PI;
+                sim.rad.zmuz = zdecl.sin() * sim.lat_arrays.sid[jlat]
+                    + sim.lat_arrays.cola[jlat] * zdecl.cos() * zhangle.cos();
+                if sim.rad.zmuz > zdawn {
+                    sim.rad.gmu0[jhor] = sim.rad.zmuz;
+                }
+            }
+        }
+    } else {
+        sim.rad.solclatcdec = sim.rad.solclat * sim.rad.solcdec;
+        sim.rad.solslat = (1. - sim.rad.solclat * sim.rad.solclat).sqrt();
+        sim.rad.solsdec = (1. - sim.rad.solcdec * sim.rad.solcdec).sqrt();
+        sim.rad.solslatsdec = sim.rad.solslat * sim.rad.solcdec;
+        for jlat in 0..NLPP {
+            for jlon in 0..NLON {
+                jhor = jhor + 1;
+                if sim.rad.ndcycle == 1 {
+                    let zhangle = zmins as FloatNum * zrtim - PI;
+                    sim.rad.zmuz = sim.rad.solslatsdec + sim.rad.solclatcdec * zhangle.cos();
+                } else {
+                    sim.rad.zmuz = sim.rad.solslatsdec + sim.rad.solclatcdec / PI;
+                }
+                if sim.rad.zmuz > zdawn {
+                    sim.rad.gmu0[jhor] = sim.rad.zmuz;
+                }
+            }
+        }
+    }
+
+    //       else
+    //        solclatcdec=solclat*solcdec
+    //        solslat=sqrt(1-solclat*solclat)
+    //        solsdec=sqrt(1-solcdec*solcdec)
+    //        solslatsdec=solslat*solsdec
+    //        do jlat = 1 , NLPP
+    //         do jlon = 0 , NLON-1
+    //          jhor = jhor + 1
+    //          if (ndcycle == 1) then
+    //           zhangle = zmins * zrtim - PI
+    //           zmuz=solslatsdec+solclatcdec*cos(zhangle)
+    //          else
+    //           zmuz=solslatsdec+solclatcdec/PI
+    //          endif
+    //          if (zmuz > zdawn) gmu0(jhor) = zmuz
+    //         enddo
+    //        enddo
+    //       endif
+    // !
+    // !**  4) copy earth-sun distance (1/r**2) to radmod
+    // !
+    //       gdist2=eccf
 }
 
 /// compute ozon distribution
@@ -2443,7 +2568,7 @@ fn orb_decl(
     lambm0: FloatNum,
     obliqr: FloatNum,
     n_days_per_year: Int,
-    ndatim: Vec<Int>,
+    ndatim: [Int; 7],
     mut delta: &mut FloatNum,
     mut eccf: &mut FloatNum,
 ) {
